@@ -6,8 +6,10 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Reflection.Emit;
 using System.Text;
 using UnityEngine;
+using UnityEngine.Windows;
 
 namespace ReforgedPotential
 {
@@ -17,7 +19,7 @@ namespace ReforgedPotential
     {
         private const string modGUID = "akuichi.ReforgedPotential";
         private const string modName = "Reforged Potential";
-        private const string modVersion = "1.0.1";
+        private const string modVersion = "1.1.0";
 
         private readonly Harmony harmony = new Harmony(modGUID);
 
@@ -42,6 +44,7 @@ namespace ReforgedPotential
         internal static ConfigEntry<string> Station_Global;
 
         internal static ConfigEntry<bool> UpgradeCantFail;
+        internal static ConfigEntry<int> CostStart;
         internal static ConfigEntry<int> CostIncreaseInterval;
         internal static ConfigEntry<int> CostIncreasePerInterval;
         internal static ConfigEntry<int> CostScalingLevelStart;
@@ -162,23 +165,24 @@ namespace ReforgedPotential
         [HarmonyPatch(typeof(Piece.Requirement), "GetAmount")]
         private class Requirement_GetAmount_Patch
         {
+            private const string LogPrefix = "[ReforgedOfPotential] GetAmount: ";
             static void Postfix(Piece.Requirement __instance, int qualityLevel, ref int __result)
             {
                 if (__instance == null) return;
 
                 if (!__instance.m_upgraderResource) return;
+                int level = qualityLevel - 1;
+                int costStartLevel = Math.Max(1, CostScalingLevelStart.Value);
+                int cost = CostStart.Value;
 
-                if (qualityLevel < 6)
+                if (CostIncreaseInterval.Value > 0 && level >= costStartLevel)
                 {
-                    __result = 1;
-                }
-                else
-                {
-                    int bonusPerLevel = qualityLevel * CostIncreasePerInterval.Value;
-                    __result = bonusPerLevel - 5;
-                    if (CostIncreasePerInterval.Value == 0) __result = 1;
+                    cost += ((level - costStartLevel)
+                        / CostIncreaseInterval.Value + 1)
+                        * CostIncreasePerInterval.Value;
                 }
 
+                __result = cost;
             }
         }
 
@@ -187,18 +191,19 @@ namespace ReforgedPotential
             UpgradeCantFail = Config.Bind("Upgrade Settings", "UpgradeCantFail", true,
                 "If true, upgrades cannot fail.");
 
-
+            CostStart = Config.Bind("Upgrade Settings", "CostStart", 1, "Base idol cost for upgrades. (Game Default is 1)");
             CostIncreasePerInterval = Config.Bind("Upgrade Settings", "CostIncreasePerInterval", 1,
                 "Additional ingredient cost each time the cost scaling interval is reached starting at CostScalingLevelStart. (Starting at level X, the upgrade cost increases by this amount every Y levels. For example, with an increase of 1 every 2 levels starting at level 6: levels 1–5 cost 1, levels 6–7 cost 2, levels 8–9 cost 3, and so on.)");
             CostIncreaseInterval = Config.Bind("Upgrade Settings", "CostIncreaseInterval", 2,
-                "Number of levels between each cost increase.");
+                "Number of levels between each cost increase. Set to 0 to disable cost scaling.");
             CostScalingLevelStart = Config.Bind("Upgrade Settings", "CostScalingLevelStart", 6,
-                "Level at which cost scaling starts.");
+                "Level at which cost scaling starts. Anything below 1 is set to 1.");
 
             UpgradeBaseDuration = Config.Bind("Upgrade Settings", "UpgradeBaseDuration", 2f,
                 "Base crafting duration for upgrading. (Game Default is 8)");
             UpgradeDurationIncreasePerLevel = Config.Bind("Upgrade Settings", "UpgradeDurationIncreasePerLevel", 1f,
                 "Additional crafting duration per item level. (Game Default is 1)");
+
             Station_Global = Config.Bind("Crafting Station", "GlobalStation", "$piece_artisanstation",
                 "Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. '$piece_workbench') or prefab name. Empty = craftable by hand.");
 
