@@ -1,6 +1,8 @@
 ﻿using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
+using Jotunn.Entities;
+using Jotunn.Managers;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -16,15 +18,17 @@ using static Version;
 
 namespace ReforgedPotential
 {
-    [BepInPlugin(modGUID, modName, modVersion)]
-    [BepInProcess("valheim.exe")]
+    [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
+    [BepInDependency(Jotunn.Main.ModGuid)]
     public class ReforgedPotential : BaseUnityPlugin
     {
-        private const string modGUID = "akuichi.ReforgedPotential";
-        private const string modName = "Reforged Potential";
-        private const string modVersion = "1.1.1";
+        public const string PluginGUID = "akuichi.ReforgedPotential";
+        public const string PluginName = "Reforged Potential";
+        public const string PluginVersion = "1.1.1";
 
-        private readonly Harmony harmony = new Harmony(modGUID);
+        public static CustomLocalization Localization = LocalizationManager.Instance.GetLocalization();
+
+        private readonly Harmony harmony = new Harmony(PluginGUID);
 
         const string Boss1Key = "GP_Eikthyr";
         const string Boss2Key = "GP_TheElder";
