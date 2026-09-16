@@ -34,18 +34,12 @@ namespace ReforgedPotential
         const string Boss6Key = "GP_Queen";
         const string Boss7Key = "GP_Fader";
 
-        internal static Dictionary<int, int> bossUpgradeValues = new Dictionary<int, int>()
-        {
-            { 1, 4 },
-            { 2, 3 },
-            { 3, 5 },
-            { 4, 2 },
-            { 5, 3 },
-            { 6, 4 },
-            { 7, 5 }
-        };
+        
 
         internal static ConfigEntry<bool> EnableBossProgression;
+
+        internal static ConfigEntry<int> BaseUpgradeLimit;
+
         internal static ConfigEntry<int> Boss1MaxUpgradeLevel;
         internal static ConfigEntry<int> Boss2MaxUpgradeLevel;
         internal static ConfigEntry<int> Boss3MaxUpgradeLevel;
@@ -53,6 +47,21 @@ namespace ReforgedPotential
         internal static ConfigEntry<int> Boss5MaxUpgradeLevel;
         internal static ConfigEntry<int> Boss6MaxUpgradeLevel;
         internal static ConfigEntry<int> Boss7MaxUpgradeLevel;
+        internal static ConfigEntry<int> Boss8MaxUpgradeLevel;
+
+        internal static Dictionary<int, int> bossUpgradeValues;
+
+        internal static Dictionary<int, string> bossNames = new Dictionary<int, string>()
+        {
+            { 1, "Eikthyr" },
+            { 2, "Elder" },
+            { 3, "Bonemass" },
+            { 4, "Moder" },
+            { 5, "Yagluth" },
+            { 6, "Queen" },
+            { 7, "Fader" },
+            { 8, "Kall Fimbulbringer" }
+        };
 
         internal static ConfigEntry<string> Recipe_Upgrader0Armor;
         internal static ConfigEntry<string> Recipe_Upgrader0Weapon;
@@ -88,6 +97,121 @@ namespace ReforgedPotential
             InitConfig();
             harmony.PatchAll();
         }
+
+        private void InitConfig()
+        {
+            //----------------
+            UpgradeCantFail = Config.Bind("Upgrade Settings", "UpgradeCantFail", true,
+                "If true, upgrades cannot fail.");
+
+            CostStart = Config.Bind("Upgrade Settings", "CostStart", 1, "Base idol cost for upgrades. (Game Default is 1)");
+            CostIncreasePerInterval = Config.Bind("Upgrade Settings", "CostIncreasePerInterval", 1,
+                "Additional ingredient cost each time the cost scaling interval is reached starting at CostScalingLevelStart. (Starting at level X, the upgrade cost increases by this amount every Y levels. For example, with an increase of 1 every 2 levels starting at level 6: levels 1–5 cost 1, levels 6–7 cost 2, levels 8–9 cost 3, and so on.)");
+            CostIncreaseInterval = Config.Bind("Upgrade Settings", "CostIncreaseInterval", 2,
+                "Number of levels between each cost increase. Set to 0 to disable cost scaling.");
+            CostScalingLevelStart = Config.Bind("Upgrade Settings", "CostScalingLevelStart", 6,
+                "Level at which cost scaling starts. Anything below 1 is set to 1.");
+            
+            UpgradeBaseDuration = Config.Bind("Upgrade Settings", "UpgradeBaseDuration", 2f,
+                "Base crafting duration for upgrading. (Game Default is 8)");
+            UpgradeDurationIncreasePerLevel = Config.Bind("Upgrade Settings", "UpgradeDurationIncreasePerLevel", 1f,
+                "Additional crafting duration per item level. (Game Default is 1)");
+            //--------------
+            EnableBossProgression = Config.Bind("Boss Progression", "Enable Boss Progression", true,
+                "If true, upgrades are limited by boss progression. Defeat bosses to unlock higher upgrade levels.");
+            BaseUpgradeLimit = Config.Bind("Boss Progression", "Base Upgrade Limit", 6,
+                "Base upgrade limit for all items before any additional calculations are made");
+            Boss1MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 1 Max Upgrade Level", 4, "Additional max upgrade level unlocked for wooden tier after defeating Eikthyr.");
+            Boss2MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 2 Max Upgrade Level", 4, "Additional max upgrade level unlocked for bronze tier and below after defeating Elder.");
+            Boss3MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 3 Max Upgrade Level", 4, "Additional max upgrade level unlocked for iron tier and below after defeating Bonemass.");
+            Boss4MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 4 Max Upgrade Level", 4, "Additional max upgrade level unlocked for silver tier and below after defeating Moder.");
+            Boss5MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 5 Max Upgrade Level", 4, "Additional max upgrade level unlocked for black metal tier and below after defeating Yagluth.");
+            Boss6MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 6 Max Upgrade Level", 4, "Additional max upgrade level unlocked for black marble tier and below after defeating Queen.");
+            Boss7MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 7 Max Upgrade Level", 4, "Additional max upgrade level unlocked for flametal tier and below after defeating Fader.");
+            Boss8MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 8 Max Upgrade Level", 100, "Additional max upgrade level unlocked for bloodgold tier and below after defeating Kall Fimbulbringer.");
+
+            bossUpgradeValues = new Dictionary<int, int>()
+            {
+                { 1, Boss1MaxUpgradeLevel.Value },
+                { 2, Boss2MaxUpgradeLevel.Value },
+                { 3, Boss3MaxUpgradeLevel.Value },
+                { 4, Boss4MaxUpgradeLevel.Value },
+                { 5, Boss5MaxUpgradeLevel.Value },
+                { 6, Boss6MaxUpgradeLevel.Value },
+                { 7, Boss7MaxUpgradeLevel.Value },
+                { 8, Boss8MaxUpgradeLevel.Value }
+            };
+
+            //--------------
+            Station_Global = Config.Bind("Crafting Station", "Global Station", "$piece_artisanstation",
+                "Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. '$piece_workbench') or prefab name. Empty = craftable by hand.");
+            //--------------
+            Recipe_Upgrader0Armor = Config.Bind("Recipes", "Wooden Protection Idol",
+                "FineWood:20,Tin:10,GreydwarfEye:10",
+                "Ingredients for Wooden Protection Idol: comma-separated entries 'PrefabName:Amount'.");
+            Recipe_Upgrader0Weapon = Config.Bind("Recipes", "Wooden Battle Idol",
+                "FineWood:20,Tin:10,GreydwarfEye:10",
+                "Ingredients for Wooden Battle Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader1Armor = Config.Bind("Recipes", "Bronze Protection Idol",
+                "Bronze:10,SurtlingCore:1",
+                "Ingredients for Bronze Protection Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader1Weapon = Config.Bind("Recipes", "Bronze Battle Idol",
+                "Bronze:10,SurtlingCore:1",
+                "Ingredients for Bronze Battle Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader2Armor = Config.Bind("Recipes", "Iron Protection Idol",
+                "Iron:10,ElderBark:5",
+                "Ingredients for Iron Protection Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader2Weapon = Config.Bind("Recipes", "Iron Battle Idol",
+                "Iron:10,ElderBark:5",
+                "Ingredients for Iron Battle Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader3Armor = Config.Bind("Recipes", "Silver Protection Idol",
+                "Silver:10,FreezeGland:5,Obsidian:5",
+                "Ingredients for Silver Protection Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader3Weapon = Config.Bind("Recipes", "Silver Battle Idol",
+                "Silver:10,FreezeGland:5,Obsidian:5",
+                "Ingredients for Silver Battle Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader4Armor = Config.Bind("Recipes", "Black Metal Protection Idol",
+                "BlackMetal:10,Needle:2,Tar:5",
+                "Ingredients for Black Metal Protection Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader4Weapon = Config.Bind("Recipes", "Black Metal Battle Idol",
+                "BlackMetal:10,Needle:2,Tar:5",
+                "Ingredients for Black Metal Battle Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader5Armor = Config.Bind("Recipes", "Black Marble Protection Idol",
+                "BlackMarble:20,BugMeat:10,Carapace:10",
+                "Ingredients for Black Marble Protection Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader5Weapon = Config.Bind("Recipes", "Black Marble Battle Idol",
+                "BlackMarble:20,BugMeat:10,Carapace:10",
+                "Ingredients for Black Marble Battle Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader6Armor = Config.Bind("Recipes", "Flametal Protection Idol",
+                "FlametalNew:10,CharredBone:15",
+                "Ingredients for Flametal Protection Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader6Weapon = Config.Bind("Recipes", "Flametal Battle Idol",
+                "FlametalNew:10,CharredBone:15",
+                "Ingredients for Flametal Battle Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader7Armor = Config.Bind("Recipes", "Bloodgold Protection Idol",
+                "Gold:10,Coins:40",
+                "Ingredients for Bloodgold Protection Idol: comma-separated 'PrefabName:Amount'.");
+
+            Recipe_Upgrader7Weapon = Config.Bind("Recipes", "Bloodgold Battle Idol",
+                "Gold:10,Coins:40",
+                "Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.");
+
+        }
+        [HarmonyPatch(typeof(ObjectDB), "Awake")]
+
         [HarmonyPatch(typeof(InventoryGui), "SetupCrafting")]
         private class InventoryGuiCraftSpeedPatches
         {
@@ -216,92 +340,7 @@ namespace ReforgedPotential
             }
         }
 
-        private void InitConfig()
-        {
-            UpgradeCantFail = Config.Bind("Upgrade Settings", "UpgradeCantFail", true,
-                "If true, upgrades cannot fail.");
-
-            CostStart = Config.Bind("Upgrade Settings", "CostStart", 1, "Base idol cost for upgrades. (Game Default is 1)");
-            CostIncreasePerInterval = Config.Bind("Upgrade Settings", "CostIncreasePerInterval", 1,
-                "Additional ingredient cost each time the cost scaling interval is reached starting at CostScalingLevelStart. (Starting at level X, the upgrade cost increases by this amount every Y levels. For example, with an increase of 1 every 2 levels starting at level 6: levels 1–5 cost 1, levels 6–7 cost 2, levels 8–9 cost 3, and so on.)");
-            CostIncreaseInterval = Config.Bind("Upgrade Settings", "CostIncreaseInterval", 2,
-                "Number of levels between each cost increase. Set to 0 to disable cost scaling.");
-            CostScalingLevelStart = Config.Bind("Upgrade Settings", "CostScalingLevelStart", 6,
-                "Level at which cost scaling starts. Anything below 1 is set to 1.");
-
-            UpgradeBaseDuration = Config.Bind("Upgrade Settings", "UpgradeBaseDuration", 2f,
-                "Base crafting duration for upgrading. (Game Default is 8)");
-            UpgradeDurationIncreasePerLevel = Config.Bind("Upgrade Settings", "UpgradeDurationIncreasePerLevel", 1f,
-                "Additional crafting duration per item level. (Game Default is 1)");
-
-            Station_Global = Config.Bind("Crafting Station", "GlobalStation", "$piece_artisanstation",
-                "Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. '$piece_workbench') or prefab name. Empty = craftable by hand.");
-
-            Recipe_Upgrader0Armor = Config.Bind("Recipes", "Wooden Protection Idol",
-                "FineWood:20,Tin:10,GreydwarfEye:10",
-                "Ingredients for Wooden Protection Idol: comma-separated entries 'PrefabName:Amount'.");
-            Recipe_Upgrader0Weapon = Config.Bind("Recipes", "Wooden Battle Idol",
-                "FineWood:20,Tin:10,GreydwarfEye:10",
-                "Ingredients for Wooden Battle Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader1Armor = Config.Bind("Recipes", "Bronze Protection Idol",
-                "Bronze:10,SurtlingCore:1",
-                "Ingredients for Bronze Protection Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader1Weapon = Config.Bind("Recipes", "Bronze Battle Idol",
-                "Bronze:10,SurtlingCore:1",
-                "Ingredients for Bronze Battle Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader2Armor = Config.Bind("Recipes", "Iron Protection Idol",
-                "Iron:10,ElderBark:5",
-                "Ingredients for Iron Protection Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader2Weapon = Config.Bind("Recipes", "Iron Battle Idol",
-                "Iron:10,ElderBark:5",
-                "Ingredients for Iron Battle Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader3Armor = Config.Bind("Recipes", "Silver Protection Idol",
-                "Silver:10,FreezeGland:5,Obsidian:5",
-                "Ingredients for Silver Protection Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader3Weapon = Config.Bind("Recipes", "Silver Battle Idol",
-                "Silver:10,FreezeGland:5,Obsidian:5",
-                "Ingredients for Silver Battle Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader4Armor = Config.Bind("Recipes", "Black Metal Protection Idol",
-                "BlackMetal:10,Needle:2,Tar:5",
-                "Ingredients for Black Metal Protection Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader4Weapon = Config.Bind("Recipes", "Black Metal Battle Idol",
-                "BlackMetal:10,Needle:2,Tar:5",
-                "Ingredients for Black Metal Battle Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader5Armor = Config.Bind("Recipes", "Black Marble Protection Idol",
-                "BlackMarble:20,BugMeat:10,Carapace:10",
-                "Ingredients for Black Marble Protection Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader5Weapon = Config.Bind("Recipes", "Black Marble Battle Idol",
-                "BlackMarble:20,BugMeat:10,Carapace:10",
-                "Ingredients for Black Marble Battle Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader6Armor = Config.Bind("Recipes", "Flametal Protection Idol",
-                "FlametalNew:10,CharredBone:15",
-                "Ingredients for Flametal Protection Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader6Weapon = Config.Bind("Recipes", "Flametal Battle Idol",
-                "FlametalNew:10,CharredBone:15",
-                "Ingredients for Flametal Battle Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader7Armor = Config.Bind("Recipes", "Bloodgold Protection Idol",
-                "Gold:10,Coins:40",
-                "Ingredients for Bloodgold Protection Idol: comma-separated 'PrefabName:Amount'.");
-
-            Recipe_Upgrader7Weapon = Config.Bind("Recipes", "Bloodgold Battle Idol",
-                "Gold:10,Coins:40",
-                "Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.");
-
-        }
-        [HarmonyPatch(typeof(ObjectDB), "Awake")]
+        
         private class ObjectDB_AddConfigRecipesMulti
         {
             private const string LogPrefix = "[ReforgedOfPotential] ConfigRecipes: ";
@@ -606,7 +645,6 @@ namespace ReforgedPotential
                             string prefabId = req.m_resItem.name;
                             int maxTier = GetMaxBossTier();
                             int itemTier = GetEquipmentTier(prefabId);
-                            //int maxUpgradeLevel = Mathf.Max(0, maxTier - itemTier + 1) * upgraderPerTier;
                             int requiredBoss = GetRequiredBossForNextUpgrade(itemTier,item.m_quality);
 
                             if (requiredBoss != -1 && requiredBoss > maxTier)
@@ -617,19 +655,19 @@ namespace ReforgedPotential
                                     $"{LogPrefix} Player attempted to upgrade " +
                                     $"{item.m_shared.m_name} from +{item.m_quality}, " +
                                     $"but max allowed is +{maxUpgradeLevel}. " +
-                                    $"Boss {requiredBoss} is required."
+                                    $"Boss {bossNames[requiredBoss]} is required."
                                 );
 
                                 player?.Message(
                                     MessageHud.MessageType.Center,
-                                    $"Defeat Boss {requiredBoss} to upgrade this weapon further."
+                                    $"Defeat {bossNames[requiredBoss]} to upgrade this weapon further."
                                 );
 
                                 return false;
                             }
                             else
                             {
-                                Debug.Log($"{LogPrefix} Upgrade allowed: {item.m_shared.m_name} +{item.m_quality}, max allowed +{GetMaxUpgradeLevel(itemTier, maxTier)}.");
+                                Debug.Log($"{LogPrefix} Upgrade allowed: {item.m_shared.m_name} + {item.m_quality}, max allowed +{GetMaxUpgradeLevel(itemTier, maxTier)}.");
                             }
                         }
                     }
@@ -679,7 +717,7 @@ namespace ReforgedPotential
 
             static int GetMaxUpgradeLevel(int itemTier, int highestBossTier)
             {
-                int maxUpgrade = 0;
+                int maxUpgrade = BaseUpgradeLimit.Value;
 
                 for (int bossTier = itemTier; bossTier <= highestBossTier; bossTier++)
                 {
@@ -691,7 +729,6 @@ namespace ReforgedPotential
 
                 return maxUpgrade;
             }
-
             static int GetRequiredBossForNextUpgrade(int itemTier, int currentUpgrade)
             {
                 int cumulativeUpgrade = 0;
