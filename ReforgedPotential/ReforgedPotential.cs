@@ -7,9 +7,12 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
+using System.Runtime.Remoting.Messaging;
 using System.Text;
 using UnityEngine;
 using UnityEngine.Windows;
+using static System.Net.Mime.MediaTypeNames;
+using static Version;
 
 namespace ReforgedPotential
 {
@@ -23,6 +26,33 @@ namespace ReforgedPotential
 
         private readonly Harmony harmony = new Harmony(modGUID);
 
+        const string Boss1Key = "GP_Eikthyr";
+        const string Boss2Key = "GP_TheElder";
+        const string Boss3Key = "GP_Bonemass";
+        const string Boss4Key = "GP_Moder";
+        const string Boss5Key = "GP_Yagluth";
+        const string Boss6Key = "GP_Queen";
+        const string Boss7Key = "GP_Fader";
+
+        internal static Dictionary<int, int> bossUpgradeValues = new Dictionary<int, int>()
+        {
+            { 1, 4 },
+            { 2, 3 },
+            { 3, 5 },
+            { 4, 2 },
+            { 5, 3 },
+            { 6, 4 },
+            { 7, 5 }
+        };
+
+        internal static ConfigEntry<bool> EnableBossProgression;
+        internal static ConfigEntry<int> Boss1MaxUpgradeLevel;
+        internal static ConfigEntry<int> Boss2MaxUpgradeLevel;
+        internal static ConfigEntry<int> Boss3MaxUpgradeLevel;
+        internal static ConfigEntry<int> Boss4MaxUpgradeLevel;
+        internal static ConfigEntry<int> Boss5MaxUpgradeLevel;
+        internal static ConfigEntry<int> Boss6MaxUpgradeLevel;
+        internal static ConfigEntry<int> Boss7MaxUpgradeLevel;
 
         internal static ConfigEntry<string> Recipe_Upgrader0Armor;
         internal static ConfigEntry<string> Recipe_Upgrader0Weapon;
@@ -423,14 +453,14 @@ namespace ReforgedPotential
                     var parts = token.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
                     if (parts.Length != 2)
                     {
-                        Debug.LogWarning($"[ReforgedOfPotential] ConfigRecipes: Invalid ingredient token '{token}'. Use 'PrefabName:Amount'.");
+                        Debug.LogWarning($"{LogPrefix}Invalid ingredient token '{token}'. Use 'PrefabName:Amount'.");
                         continue;
                     }
 
                     string name = parts[0].Trim();
                     if (!int.TryParse(parts[1].Trim(), out int amount) || amount <= 0)
                     {
-                        Debug.LogWarning($"[ReforgedOfPotential] ConfigRecipes: Invalid amount in token '{token}'. Must be positive integer.");
+                        Debug.LogWarning($"{LogPrefix}Invalid amount in token '{token}'. Must be positive integer.");
                         continue;
                     }
 
@@ -438,7 +468,7 @@ namespace ReforgedPotential
                     GameObject prefab = odb.GetItemPrefab(name) ?? GetPrefabFromZNet(name);
                     if (prefab == null)
                     {
-                        Debug.LogWarning($"[ReforgedOfPotential] ConfigRecipes: Ingredient prefab '{name}' not found in ObjectDB or ZNetScene.");
+                        Debug.LogWarning($"{LogPrefix}Ingredient prefab '{name}' not found in ObjectDB or ZNetScene.");
                         continue;
                     }
 
@@ -446,7 +476,7 @@ namespace ReforgedPotential
                     ItemDrop drop = prefab.GetComponent<ItemDrop>();
                     if (drop == null)
                     {
-                        Debug.LogWarning($"[ReforgedOfPotential] ConfigRecipes: Ingredient prefab '{name}' missing ItemDrop component; skipping.");
+                        Debug.LogWarning($"{LogPrefix}Ingredient prefab '{name}' missing ItemDrop component; skipping.");
                         continue;
                     }
 
@@ -536,6 +566,145 @@ namespace ReforgedPotential
                 }
                 catch { }
                 return "<unknown>";
+            }
+        }
+
+        [HarmonyPatch(typeof(InventoryGui), "OnCraftPressed")]
+        private class InventoryGui_OnCraftPressed_Patch
+        {
+            private const string LogPrefix = "[ReforgedOfPotential] OnCraftPressed: ";
+            static bool Prefix(InventoryGui __instance)
+            {
+                try
+                {
+                    // get the private m_selectedRecipe field (struct RecipeDataPair)
+                    var selField = typeof(InventoryGui).GetField("m_selectedRecipe", BindingFlags.Instance | BindingFlags.NonPublic);
+                    var selPair = selField?.GetValue(__instance);
+                    if (selPair == null) return true; // no selection -> run original
+
+                    var pairType = selPair.GetType();
+                    var recipeProp = pairType.GetProperty("Recipe", BindingFlags.Instance | BindingFlags.Public);
+                    var itemProp = pairType.GetProperty("ItemData", BindingFlags.Instance | BindingFlags.Public);
+
+                    var recipe = recipeProp?.GetValue(selPair) as Recipe;
+                    var item = itemProp?.GetValue(selPair) as ItemDrop.ItemData;
+
+                    if (recipe == null) return true; // nothing to do
+
+                    // Example condition: if player is at an upgrader and the recipe contains an upgrader resource -> block
+                    var player = Player.m_localPlayer;
+                    var station = player?.GetCurrentCraftingStation();
+                    bool atUpgrader = station != null && station.m_upgrader;
+
+                    if (atUpgrader && item != null)
+                    {
+                        foreach (var req in recipe.m_resources ?? new Piece.Requirement[0])
+                        {
+                            if (req == null || req.m_resItem == null) continue;
+
+                            // preferred stable identifier: prefab name
+                            string prefabId = req.m_resItem.name;
+                            int maxTier = GetMaxBossTier();
+                            int itemTier = GetEquipmentTier(prefabId);
+                            //int maxUpgradeLevel = Mathf.Max(0, maxTier - itemTier + 1) * upgraderPerTier;
+                            int requiredBoss = GetRequiredBossForNextUpgrade(itemTier,item.m_quality);
+
+                            if (requiredBoss != -1 && requiredBoss > maxTier)
+                            {
+                                int maxUpgradeLevel = GetMaxUpgradeLevel(itemTier, maxTier);
+
+                                Debug.LogWarning(
+                                    $"{LogPrefix} Player attempted to upgrade " +
+                                    $"{item.m_shared.m_name} from +{item.m_quality}, " +
+                                    $"but max allowed is +{maxUpgradeLevel}. " +
+                                    $"Boss {requiredBoss} is required."
+                                );
+
+                                player?.Message(
+                                    MessageHud.MessageType.Center,
+                                    $"Defeat Boss {requiredBoss} to upgrade this weapon further."
+                                );
+
+                                return false;
+                            }
+                            else
+                            {
+                                Debug.Log($"{LogPrefix} Upgrade allowed: {item.m_shared.m_name} +{item.m_quality}, max allowed +{GetMaxUpgradeLevel(itemTier, maxTier)}.");
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Debug.LogWarning($"[ReforgedPotential] OnCraftPressed prefix exception: {ex}");
+                    // fall through and run original on error
+                }
+
+                // return true -> run original OnCraftPressed
+                return true;
+            }
+
+            static int GetMaxBossTier()
+            {
+                if (ZoneSystem.instance.CheckKey(Boss7Key, GameKeyType.Player))
+                    return 7;
+                if (ZoneSystem.instance.CheckKey(Boss6Key, GameKeyType.Player))
+                    return 6;
+                if (ZoneSystem.instance.CheckKey(Boss5Key, GameKeyType.Player))
+                    return 5;
+                if (ZoneSystem.instance.CheckKey(Boss4Key, GameKeyType.Player))
+                    return 4;
+                if (ZoneSystem.instance.CheckKey(Boss3Key, GameKeyType.Player))
+                    return 3;
+                if (ZoneSystem.instance.CheckKey(Boss2Key, GameKeyType.Player))
+                    return 2;
+                if (ZoneSystem.instance.CheckKey(Boss1Key, GameKeyType.Player))
+                    return 1;
+                return 0; // no bosses defeated
+            }
+
+            static int GetEquipmentTier(string prefabName)
+            {
+                if (string.IsNullOrEmpty(prefabName)) return 0;
+                if (prefabName.Contains("Upgrader7")) return 8;
+                if (prefabName.Contains("Upgrader6")) return 7;
+                if (prefabName.Contains("Upgrader5")) return 6;
+                if (prefabName.Contains("Upgrader4")) return 5;
+                if (prefabName.Contains("Upgrader3")) return 4;
+                if (prefabName.Contains("Upgrader2")) return 3;
+                if (prefabName.Contains("Upgrader1")) return 2;
+                if (prefabName.Contains("Upgrader0")) return 1;
+                return -1; // unknown
+            }
+
+            static int GetMaxUpgradeLevel(int itemTier, int highestBossTier)
+            {
+                int maxUpgrade = 0;
+
+                for (int bossTier = itemTier; bossTier <= highestBossTier; bossTier++)
+                {
+                    if (bossUpgradeValues.TryGetValue(bossTier, out int upgradeAmount))
+                    {
+                        maxUpgrade += upgradeAmount;
+                    }
+                }
+
+                return maxUpgrade;
+            }
+
+            static int GetRequiredBossForNextUpgrade(int itemTier, int currentUpgrade)
+            {
+                int cumulativeUpgrade = 0;
+
+                for (int bossTier = itemTier; bossUpgradeValues.ContainsKey(bossTier); bossTier++)
+                {
+                    cumulativeUpgrade += bossUpgradeValues[bossTier];
+
+                    if (currentUpgrade < cumulativeUpgrade)
+                        return bossTier;
+                }
+
+                return -1;
             }
         }
     }
