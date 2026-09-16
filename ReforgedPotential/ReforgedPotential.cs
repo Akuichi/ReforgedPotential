@@ -645,29 +645,15 @@ namespace ReforgedPotential
                             string prefabId = req.m_resItem.name;
                             int maxTier = GetMaxBossTier();
                             int itemTier = GetEquipmentTier(prefabId);
-                            int requiredBoss = GetRequiredBossForNextUpgrade(itemTier,item.m_quality);
+                            int maxUpgradeLevel = GetMaxUpgradeLevel(itemTier, maxTier);
 
-                            if (requiredBoss != -1 && requiredBoss > maxTier)
-                            {
-                                int maxUpgradeLevel = GetMaxUpgradeLevel(itemTier, maxTier);
-
-                                Debug.LogWarning(
-                                    $"{LogPrefix} Player attempted to upgrade " +
-                                    $"{item.m_shared.m_name} from +{item.m_quality}, " +
-                                    $"but max allowed is +{maxUpgradeLevel}. " +
-                                    $"Boss {bossNames[requiredBoss]} is required."
-                                );
-
-                                player?.Message(
-                                    MessageHud.MessageType.Center,
-                                    $"Defeat {bossNames[requiredBoss]} to upgrade this weapon further."
-                                );
-
-                                return false;
-                            }
-                            else
-                            {
-                                Debug.Log($"{LogPrefix} Upgrade allowed: {item.m_shared.m_name} + {item.m_quality}, max allowed +{GetMaxUpgradeLevel(itemTier, maxTier)}.");
+                            if (item.m_quality >= maxUpgradeLevel) 
+                            { 
+                                int requiredBoss = GetRequiredBossForNextUpgrade(itemTier, item.m_quality);
+                                Debug.LogWarning($"{LogPrefix} Player attempted to upgrade {item.m_shared.m_name} " + $"to quality {item.m_quality + 1}, " +
+                                    $"but max allowed is {maxUpgradeLevel}. " + $"Required boss: {bossNames[requiredBoss]}");
+                                player?.Message(MessageHud.MessageType.Center, $"Defeat {bossNames[requiredBoss]} to upgrade this weapon further.");
+                                return false; 
                             }
                         }
                     }
@@ -727,11 +713,12 @@ namespace ReforgedPotential
                     }
                 }
 
+                Debug.LogWarning($"[ReforgedPotential] GetMaxUpgradeLevel: itemTier={itemTier}, highestBossTier={highestBossTier}, maxUpgrade={maxUpgrade}");
                 return maxUpgrade;
             }
             static int GetRequiredBossForNextUpgrade(int itemTier, int currentUpgrade)
             {
-                int cumulativeUpgrade = 0;
+                int cumulativeUpgrade = BaseUpgradeLimit.Value;
 
                 for (int bossTier = itemTier; bossUpgradeValues.ContainsKey(bossTier); bossTier++)
                 {
