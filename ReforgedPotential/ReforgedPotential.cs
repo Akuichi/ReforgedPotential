@@ -53,6 +53,7 @@ namespace ReforgedPotential
 
         internal static Dictionary<int, string> bossNames = new Dictionary<int, string>()
         {
+            { -1, "No More Further Boss" },
             { 1, "Eikthyr" },
             { 2, "Elder" },
             { 3, "Bonemass" },
@@ -119,7 +120,7 @@ namespace ReforgedPotential
             //--------------
             EnableBossProgression = Config.Bind("Boss Progression", "Enable Boss Progression", true,
                 "If true, upgrades are limited by boss progression. Defeat bosses to unlock higher upgrade levels.");
-            BaseUpgradeLimit = Config.Bind("Boss Progression", "Base Upgrade Limit", 6,
+            BaseUpgradeLimit = Config.Bind("Boss Progression", "Base Upgrade Limit", 5,
                 "Base upgrade limit for all items before any additional calculations are made");
             Boss1MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 1 Max Upgrade Level", 4, "Additional max upgrade level unlocked for wooden tier after defeating Eikthyr.");
             Boss2MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 2 Max Upgrade Level", 4, "Additional max upgrade level unlocked for bronze tier and below after defeating Elder.");
@@ -616,6 +617,7 @@ namespace ReforgedPotential
             {
                 try
                 {
+                    if (EnableBossProgression.Value == false) return true; // not enabled; run original
                     // get the private m_selectedRecipe field (struct RecipeDataPair)
                     var selField = typeof(InventoryGui).GetField("m_selectedRecipe", BindingFlags.Instance | BindingFlags.NonPublic);
                     var selPair = selField?.GetValue(__instance);
@@ -643,6 +645,16 @@ namespace ReforgedPotential
 
                             // preferred stable identifier: prefab name
                             string prefabId = req.m_resItem.name;
+                            if (!prefabId.Contains("Upgrader"))
+                            {
+                                Debug.LogWarning($"{LogPrefix} Iterating resources needed to upgrade for {item.m_shared.m_name} " + $"skipping non upgrader resource: {prefabId}.");
+                                continue;
+                            }
+                            else
+                            {
+                                Debug.LogWarning($"{LogPrefix} Iterating resources needed to upgrade for {item.m_shared.m_name} " + $"found upgrader resource: {prefabId}.");
+                            }
+                            
                             int maxTier = GetMaxBossTier();
                             int itemTier = GetEquipmentTier(prefabId);
                             int maxUpgradeLevel = GetMaxUpgradeLevel(itemTier, maxTier);
@@ -652,10 +664,12 @@ namespace ReforgedPotential
                                 int requiredBoss = GetRequiredBossForNextUpgrade(itemTier, item.m_quality);
                                 Debug.LogWarning($"{LogPrefix} Player attempted to upgrade {item.m_shared.m_name} " + $"to quality {item.m_quality + 1}, " +
                                     $"but max allowed is {maxUpgradeLevel}. " + $"Required boss: {bossNames[requiredBoss]}");
-                                player?.Message(MessageHud.MessageType.Center, $"Defeat {bossNames[requiredBoss]} to upgrade this weapon further.");
+                                player?.Message(MessageHud.MessageType.Center, requiredBoss != -1 ? $"Defeat {bossNames[requiredBoss]} to upgrade this weapon further." : "Max upgrade level reached!");
                                 return false; 
                             }
+                            return true;
                         }
+                        return false;
                     }
                 }
                 catch (Exception ex)
@@ -712,22 +726,34 @@ namespace ReforgedPotential
                         maxUpgrade += upgradeAmount;
                     }
                 }
-
+                if (itemTier == highestBossTier + 1)
+                {
+                    maxUpgrade += 1;
+                    Debug.LogWarning($"[ReforgedPotential] GetMaxUpgradeLevel: itemTier={itemTier} is equal to highestBossTier={highestBossTier}, adding +1 to maxUpgrade.");
+                }
                 Debug.LogWarning($"[ReforgedPotential] GetMaxUpgradeLevel: itemTier={itemTier}, highestBossTier={highestBossTier}, maxUpgrade={maxUpgrade}");
                 return maxUpgrade;
             }
             static int GetRequiredBossForNextUpgrade(int itemTier, int currentUpgrade)
             {
                 int cumulativeUpgrade = BaseUpgradeLimit.Value;
+                Debug.Log($"[ReforgedPotential] GetRequiredBossForNextUpgrade: itemTier={itemTier}, currentUpgrade={currentUpgrade}, base={cumulativeUpgrade}");
 
                 for (int bossTier = itemTier; bossUpgradeValues.ContainsKey(bossTier); bossTier++)
                 {
-                    cumulativeUpgrade += bossUpgradeValues[bossTier];
+                    int bossValue = bossUpgradeValues[bossTier];
+                    cumulativeUpgrade += bossValue;
+                    string bossName = bossNames.ContainsKey(bossTier) ? bossNames[bossTier] : "<unknown>";
+                    Debug.Log($"[ReforgedPotential] Checking bossTier={bossTier}, bossValue={bossValue}, cumulativeUpgrade={cumulativeUpgrade} (bossName={bossName})");
 
                     if (currentUpgrade < cumulativeUpgrade)
+                    {
+                        Debug.Log($"[ReforgedPotential] Next required bossTier={bossTier} ({bossName}) to unlock upgrades beyond {currentUpgrade}.");
                         return bossTier;
+                    }
                 }
 
+                Debug.Log($"[ReforgedPotential] No boss tier found that unlocks upgrades beyond currentUpgrade={currentUpgrade}. cumulativeUpgrade={cumulativeUpgrade}");
                 return -1;
             }
         }
