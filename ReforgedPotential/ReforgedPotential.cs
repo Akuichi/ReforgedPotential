@@ -21,6 +21,7 @@ namespace ReforgedPotential
 {
     [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
     [BepInDependency(Jotunn.Main.ModGuid)]
+    [SynchronizationMode(AdminOnlyStrictness.IfOnServer)]
     public class ReforgedPotential : BaseUnityPlugin
     {
         public const string PluginGUID = "akuichi.ReforgedPotential";
@@ -104,13 +105,29 @@ namespace ReforgedPotential
         private void Awake()
         {
             InitConfig();
+            CreateConfigWatcher();
             harmony.PatchAll();
+        }
+
+        private void CreateConfigWatcher()
+        {
+            // Create config file watcher
+            ConfigFileWatcher configFileWatcher = new(Config, reloadDelay: 1000);  // set delay before a subsequent reload can trigger in ms
+
+            // Subscribe to the event that fires whenever the config is reloaded.
+            configFileWatcher.OnConfigFileReloaded += () =>
+            {
+                Debug.Log("[ReforgedOfPotential] Config file reloaded, reinitializing config values.");
+                InitConfig();
+            };
         }
 
         private void InitConfig()
         {
-            EnableServerSync = Config.Bind("Server Only", "Enable Server Sync", true, "If true, config values are synchronized from server to clients.");
-            ConfigurationManagerAttributes isAdminOnly = new ConfigurationManagerAttributes { IsAdminOnly = EnableServerSync.Value };
+            Config.SaveOnConfigSet = true;
+            ConfigurationManagerAttributes isAdminOnly = new ConfigurationManagerAttributes { IsAdminOnly = true };
+            EnableServerSync = Config.Bind("Server Only", "Enable Server Sync", true, new ConfigDescription("If true, config values are synchronized from server to clients.", null, isAdminOnly));
+            isAdminOnly = new ConfigurationManagerAttributes { IsAdminOnly = EnableServerSync.Value };
             //----------------
             UpgradeCantFail = Config.Bind("Upgrade Settings", "UpgradeCantFail", true,
                  new ConfigDescription("If true, upgrades cannot fail.", null, isAdminOnly));
