@@ -16,6 +16,7 @@ using UnityEngine;
 using UnityEngine.Windows;
 using static System.Net.Mime.MediaTypeNames;
 using static Version;
+using Logger = Jotunn.Logger;
 
 namespace ReforgedPotential
 {
@@ -29,7 +30,6 @@ namespace ReforgedPotential
         public const string PluginVersion = "1.1.1";
 
         public static CustomLocalization Localization = LocalizationManager.Instance.GetLocalization();
-
         private readonly Harmony harmony = new Harmony(PluginGUID);
 
         const string Boss1Key = "GP_Eikthyr";
@@ -117,7 +117,7 @@ namespace ReforgedPotential
             // Subscribe to the event that fires whenever the config is reloaded.
             configFileWatcher.OnConfigFileReloaded += () =>
             {
-                Debug.Log("[ReforgedOfPotential] Config file reloaded, reinitializing config values.");
+                Jotunn.Logger.LogInfo("Config file reloaded, reinitializing config values.");
                 InitConfig();
             };
         }
@@ -242,7 +242,7 @@ namespace ReforgedPotential
                 new ConfigDescription("Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
         }
-        [HarmonyPatch(typeof(ObjectDB), "Awake")]
+        
 
         [HarmonyPatch(typeof(InventoryGui), "SetupCrafting")]
         private class InventoryGuiCraftSpeedPatches
@@ -351,7 +351,6 @@ namespace ReforgedPotential
         [HarmonyPatch(typeof(Piece.Requirement), "GetAmount")]
         private class Requirement_GetAmount_Patch
         {
-            private const string LogPrefix = "[ReforgedOfPotential] GetAmount: ";
             static void Postfix(Piece.Requirement __instance, int qualityLevel, ref int __result)
             {
                 if (__instance == null) return;
@@ -372,24 +371,22 @@ namespace ReforgedPotential
             }
         }
 
-        
+        [HarmonyPatch(typeof(ObjectDB), "Awake")]
         private class ObjectDB_AddConfigRecipesMulti
         {
-            private const string LogPrefix = "[ReforgedOfPotential] ConfigRecipes: ";
-
             static void Postfix(ObjectDB __instance)
             {
                 try
                 {
                     if (__instance == null)
                     {
-                        Debug.LogWarning($"{LogPrefix}ObjectDB instance is null.");
+                        Jotunn.Logger.LogWarning("ObjectDB instance is null.");
                         return;
                     }
 
                     if (!EnableRecipes.Value)
                     {
-                        Debug.Log($"{LogPrefix}Idol crafting recipes are disabled.");
+                        Jotunn.Logger.LogInfo("Idol crafting recipes are disabled. Skipping recipe additions");
                         return;
                     }
 
@@ -417,11 +414,11 @@ namespace ReforgedPotential
                     CraftingStation globalStation = ResolveCraftingStation(__instance, Station_Global?.Value?.Trim());
                     if (globalStation != null)
                     {
-                        Debug.Log($"{LogPrefix}Resolved global crafting station: '{globalStation.m_name ?? globalStation.gameObject.name}'");
+                        Jotunn.Logger.LogInfo($"Resolved global crafting station: '{globalStation.m_name ?? globalStation.gameObject.name}'");
                     }
                     else if (!string.IsNullOrEmpty(Station_Global?.Value))
                     {
-                        Debug.LogWarning($"{LogPrefix}Global station '{Station_Global.Value}' was not found; recipes will be craftable by hand.");
+                        Jotunn.Logger.LogWarning($"Global station '{Station_Global.Value}' was not found; recipes will be craftable by hand.");
                     }
 
                     int added = 0;
@@ -431,14 +428,14 @@ namespace ReforgedPotential
                         var cfg = t.RecipeCfg;
                         if (cfg == null)
                         {
-                            Debug.LogWarning($"{LogPrefix}No config for {prefabName}; skipping.");
+                            Jotunn.Logger.LogWarning($"No config for {prefabName}; skipping.");
                             continue;
                         }
 
                         string cfgValue = cfg.Value?.Trim();
                         if (string.IsNullOrEmpty(cfgValue))
                         {
-                            Debug.Log($"{LogPrefix}Empty ingredient list for {prefabName}; skipping.");
+                            Jotunn.Logger.LogInfo($"Empty ingredient list for {prefabName}; skipping.");
                             continue;
                         }
 
@@ -446,14 +443,14 @@ namespace ReforgedPotential
                         GameObject targetGO = __instance.GetItemPrefab(prefabName);
                         if (targetGO == null)
                         {
-                            Debug.LogWarning($"{LogPrefix}Target prefab '{prefabName}' not found in ObjectDB; skipping.");
+                            Jotunn.Logger.LogWarning($"Target prefab '{prefabName}' not found in ObjectDB; skipping.");
                             continue;
                         }
 
                         ItemDrop targetItem = targetGO.GetComponent<ItemDrop>();
                         if (targetItem == null)
                         {
-                            Debug.LogWarning($"{LogPrefix}Target prefab '{prefabName}' has no ItemDrop; skipping.");
+                            Jotunn.Logger.LogWarning($"Target prefab '{prefabName}' has no ItemDrop; skipping.");
                             continue;
                         }
 
@@ -462,7 +459,7 @@ namespace ReforgedPotential
                                                                      (r.m_item == targetItem || string.Equals(r.m_item.name, prefabName, StringComparison.Ordinal)));
                         if (exists)
                         {
-                            Debug.Log($"{LogPrefix}Recipe for '{prefabName}' already exists; skipping.");
+                            Jotunn.Logger.LogInfo($"Recipe for '{prefabName}' already exists; skipping.");
                             continue;
                         }
 
@@ -470,7 +467,7 @@ namespace ReforgedPotential
                         var requirements = ParseRequirements(cfgValue, __instance).ToArray();
                         if (requirements == null || requirements.Length == 0)
                         {
-                            Debug.LogWarning($"{LogPrefix}No valid ingredients parsed for '{prefabName}' from '{cfgValue}'; skipping.");
+                            Jotunn.Logger.LogWarning($"No valid ingredients parsed for '{prefabName}' from '{cfgValue}'; skipping.");
                             continue;
                         }
 
@@ -487,12 +484,12 @@ namespace ReforgedPotential
 
                         __instance.m_recipes.Add(recipe);
                         added++;
-                        Debug.Log($"{LogPrefix}Added recipe for '{prefabName}' requiring {string.Join(", ", requirements.Select(req => $"{GetReqName(req)} x{req.m_amount}"))}.");
+                        Jotunn.Logger.LogInfo($"Added recipe for '{prefabName}' requiring {string.Join(", ", requirements.Select(req => $"{GetReqName(req)} x{req.m_amount}"))}.");
                     }
 
                     if (added > 0)
                     {
-                        Debug.Log($"{LogPrefix}Finished adding {added} recipe(s). Total recipes now: {__instance.m_recipes.Count}");
+                        Jotunn.Logger.LogInfo($"Finished adding {added} recipe(s). Total recipes now: {__instance.m_recipes.Count}");
                         // try to refresh crafting UI if open
                         try
                         {
@@ -503,7 +500,7 @@ namespace ReforgedPotential
                             {
                                 var updateMethod = invGuiType.GetMethod("UpdateCraftingPanel", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                                 updateMethod?.Invoke(invGui, null);
-                                Debug.Log($"{LogPrefix}Requested InventoryGui.UpdateCraftingPanel()");
+                                Jotunn.Logger.LogInfo($"Requested InventoryGui.UpdateCraftingPanel()");
                             }
                         }
                         catch { /* non-critical */ }
@@ -511,7 +508,7 @@ namespace ReforgedPotential
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogError($"{LogPrefix}Exception: {ex}");
+                    Jotunn.Logger.LogError($"Exception: {ex}");
                 }
             }
 
@@ -530,14 +527,14 @@ namespace ReforgedPotential
                     var parts = token.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
                     if (parts.Length != 2)
                     {
-                        Debug.LogWarning($"{LogPrefix}Invalid ingredient token '{token}'. Use 'PrefabName:Amount'.");
+                        Jotunn.Logger.LogWarning($"Invalid ingredient token '{token}'. Use 'PrefabName:Amount'.");
                         continue;
                     }
 
                     string name = parts[0].Trim();
                     if (!int.TryParse(parts[1].Trim(), out int amount) || amount <= 0)
                     {
-                        Debug.LogWarning($"{LogPrefix}Invalid amount in token '{token}'. Must be positive integer.");
+                        Jotunn.Logger.LogWarning($"Invalid amount in token '{token}'. Must be positive integer.");
                         continue;
                     }
 
@@ -545,7 +542,7 @@ namespace ReforgedPotential
                     GameObject prefab = odb.GetItemPrefab(name) ?? GetPrefabFromZNet(name);
                     if (prefab == null)
                     {
-                        Debug.LogWarning($"{LogPrefix}Ingredient prefab '{name}' not found in ObjectDB or ZNetScene.");
+                        Jotunn.Logger.LogWarning($"Ingredient prefab '{name}' not found in ObjectDB or ZNetScene.");
                         continue;
                     }
 
@@ -553,7 +550,7 @@ namespace ReforgedPotential
                     ItemDrop drop = prefab.GetComponent<ItemDrop>();
                     if (drop == null)
                     {
-                        Debug.LogWarning($"{LogPrefix}Ingredient prefab '{name}' missing ItemDrop component; skipping.");
+                        Jotunn.Logger.LogWarning($"Ingredient prefab '{name}' missing ItemDrop component; skipping.");
                         continue;
                     }
 
@@ -628,7 +625,7 @@ namespace ReforgedPotential
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[ReforgedOfPotential] ConfigRecipes: ResolveCraftingStation exception: {ex}");
+                    Jotunn.Logger.LogWarning($"[ReforgedOfPotential] ConfigRecipes: ResolveCraftingStation exception: {ex}");
                 }
 
                 return null;
@@ -649,12 +646,11 @@ namespace ReforgedPotential
         [HarmonyPatch(typeof(InventoryGui), "OnCraftPressed")]
         private class InventoryGui_OnCraftPressed_Patch
         {
-            private const string LogPrefix = "[ReforgedOfPotential] OnCraftPressed: ";
             static bool Prefix(InventoryGui __instance)
             {
                 try
                 {
-                    if (EnableBossProgression.Value == false) return true; // not enabled; run original
+                    if (EnableBossProgression.Value == false) return true;
                     // get the private m_selectedRecipe field (struct RecipeDataPair)
                     var selField = typeof(InventoryGui).GetField("m_selectedRecipe", BindingFlags.Instance | BindingFlags.NonPublic);
                     var selPair = selField?.GetValue(__instance);
@@ -684,12 +680,12 @@ namespace ReforgedPotential
                             string prefabId = req.m_resItem.name;
                             if (!prefabId.Contains("Upgrader"))
                             {
-                                Debug.LogWarning($"{LogPrefix} Iterating resources needed to upgrade for {item.m_shared.m_name} " + $"skipping non upgrader resource: {prefabId}.");
+                                Jotunn.Logger.LogDebug($"Iterating resources needed to upgrade for {item.m_shared.m_name} " + $"skipping non upgrader resource: {prefabId}.");
                                 continue;
                             }
                             else
                             {
-                                Debug.LogWarning($"{LogPrefix} Iterating resources needed to upgrade for {item.m_shared.m_name} " + $"found upgrader resource: {prefabId}.");
+                                Jotunn.Logger.LogDebug($"Iterating resources needed to upgrade for {item.m_shared.m_name} " + $"found upgrader resource: {prefabId}.");
                             }
                             
                             int maxTier = GetMaxBossTier();
@@ -699,7 +695,7 @@ namespace ReforgedPotential
                             if (item.m_quality >= maxUpgradeLevel) 
                             { 
                                 int requiredBoss = GetRequiredBossForNextUpgrade(itemTier, item.m_quality);
-                                Debug.LogWarning($"{LogPrefix} Player attempted to upgrade {item.m_shared.m_name} " + $"to quality {item.m_quality + 1}, " +
+                                Jotunn.Logger.LogDebug($"Player attempted to upgrade {item.m_shared.m_name} " + $"to quality {item.m_quality + 1}, " +
                                     $"but max allowed is {maxUpgradeLevel}. " + $"Required boss: {bossNames[requiredBoss]}");
                                 player?.Message(MessageHud.MessageType.Center, requiredBoss != -1 ? $"Defeat {bossNames[requiredBoss]} to upgrade this weapon further." : "Max upgrade level reached!");
                                 return false; 
@@ -711,7 +707,7 @@ namespace ReforgedPotential
                 }
                 catch (Exception ex)
                 {
-                    Debug.LogWarning($"[ReforgedPotential] OnCraftPressed prefix exception: {ex}");
+                    Jotunn.Logger.LogWarning($"OnCraftPressed prefix exception: {ex}");
                     // fall through and run original on error
                 }
 
@@ -766,31 +762,31 @@ namespace ReforgedPotential
                 if (itemTier == highestBossTier + 1)
                 {
                     maxUpgrade += 1;
-                    Debug.LogWarning($"[ReforgedPotential] GetMaxUpgradeLevel: itemTier={itemTier} is equal to highestBossTier={highestBossTier}, adding +1 to maxUpgrade.");
+                    Jotunn.Logger.LogDebug($"GetMaxUpgradeLevel: itemTier={itemTier} is equal to highestBossTier={highestBossTier}, adding +1 to maxUpgrade.");
                 }
-                Debug.LogWarning($"[ReforgedPotential] GetMaxUpgradeLevel: itemTier={itemTier}, highestBossTier={highestBossTier}, maxUpgrade={maxUpgrade}");
+                Jotunn.Logger.LogDebug($"GetMaxUpgradeLevel: itemTier={itemTier}, highestBossTier={highestBossTier}, maxUpgrade={maxUpgrade}");
                 return maxUpgrade;
             }
             static int GetRequiredBossForNextUpgrade(int itemTier, int currentUpgrade)
             {
                 int cumulativeUpgrade = BaseUpgradeLimit.Value;
-                Debug.Log($"[ReforgedPotential] GetRequiredBossForNextUpgrade: itemTier={itemTier}, currentUpgrade={currentUpgrade}, base={cumulativeUpgrade}");
+                Jotunn.Logger.LogDebug($"GetRequiredBossForNextUpgrade: itemTier={itemTier}, currentUpgrade={currentUpgrade}, base={cumulativeUpgrade}");
 
                 for (int bossTier = itemTier; bossUpgradeValues.ContainsKey(bossTier); bossTier++)
                 {
                     int bossValue = bossUpgradeValues[bossTier];
                     cumulativeUpgrade += bossValue;
                     string bossName = bossNames.ContainsKey(bossTier) ? bossNames[bossTier] : "<unknown>";
-                    Debug.Log($"[ReforgedPotential] Checking bossTier={bossTier}, bossValue={bossValue}, cumulativeUpgrade={cumulativeUpgrade} (bossName={bossName})");
+                    Jotunn.Logger.LogWarning($"Checking bossTier={bossTier}, bossValue={bossValue}, cumulativeUpgrade={cumulativeUpgrade} (bossName={bossName})");
 
                     if (currentUpgrade < cumulativeUpgrade)
                     {
-                        Debug.Log($"[ReforgedPotential] Next required bossTier={bossTier} ({bossName}) to unlock upgrades beyond {currentUpgrade}.");
+                        Jotunn.Logger.LogDebug($"Next required bossTier={bossTier} ({bossName}) to unlock upgrades beyond {currentUpgrade}.");
                         return bossTier;
                     }
                 }
 
-                Debug.Log($"[ReforgedPotential] No boss tier found that unlocks upgrades beyond currentUpgrade={currentUpgrade}. cumulativeUpgrade={cumulativeUpgrade}");
+                Jotunn.Logger.LogDebug($"No boss tier found that unlocks upgrades beyond currentUpgrade={currentUpgrade}. cumulativeUpgrade={cumulativeUpgrade}");
                 return -1;
             }
         }
