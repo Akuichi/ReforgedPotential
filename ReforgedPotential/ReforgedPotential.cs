@@ -20,7 +20,6 @@ using UnityEngine.Windows;
 using static System.Net.Mime.MediaTypeNames;
 using static Version;
 using Logger = Jotunn.Logger;
-
 namespace ReforgedPotential
 {
     [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
@@ -95,7 +94,8 @@ namespace ReforgedPotential
 
         internal static ConfigEntry<string> Station_Global;
 
-        internal static ConfigEntry<bool> UpgradeCantFail;
+        internal static ConfigEntry<float> UpgradeChance;
+        internal static ConfigEntry<float> BreakChance;
         internal static ConfigEntry<int> CostStart;
         internal static ConfigEntry<int> CostIncreaseInterval;
         internal static ConfigEntry<int> CostIncreasePerInterval;
@@ -176,55 +176,58 @@ namespace ReforgedPotential
         {
             Config.SaveOnConfigSet = true;
             ConfigurationManagerAttributes isAdminOnly = new ConfigurationManagerAttributes { IsAdminOnly = true };
-            EnableServerSync = Config.Bind("Server Only", "Enable Server Sync", true, new ConfigDescription("If true, config values are synchronized from server to clients.", null, isAdminOnly));
+            EnableServerSync = Config.Bind("Server Only", "01. Enable Server Sync", true, new ConfigDescription("If true, config values are synchronized from server to clients.", null, isAdminOnly));
             isAdminOnly = new ConfigurationManagerAttributes { IsAdminOnly = EnableServerSync.Value };
             //-------------
-            EnableGlobalUpgradeNotifications = Config.Bind("Global Notifications","Enable Global Upgrade Notifications",true,
+            EnableGlobalUpgradeNotifications = Config.Bind("Global Notifications","01. Enable Global Upgrade Notifications",true,
                 new ConfigDescription("Broadcast a message to all online players when someone attempts an upgrade.", null, isAdminOnly));
 
-            SuccessMessage = Config.Bind("Global Notifications","Success Message","Hidden Forge: '{PlayerName}' successfully upgraded '{ItemName}' to level '{Level}'.",
+            SuccessMessage = Config.Bind("Global Notifications","02. Success Message","Hidden Forge: '{PlayerName}' successfully upgraded '{ItemName}' to level '{Level}'.",
                 new ConfigDescription("Message shown on successful upgrade. Supports {PlayerName}, {ItemName}, {Level}.", null, isAdminOnly));
 
-            FailedMessage = Config.Bind("Global Notifications","Failed Message","Hidden Forge: '{PlayerName}' tried to upgrade '{ItemName}' to level '{Level}', but failed.",
+            FailedMessage = Config.Bind("Global Notifications","03. Failed Message","Hidden Forge: '{PlayerName}' tried to upgrade '{ItemName}' to level '{Level}', but failed.",
                 new ConfigDescription("Message shown on failed upgrade. Supports {PlayerName}, {ItemName}, {Level}.", null, isAdminOnly));
             //----------------
-            UpgradeCantFail = Config.Bind("Upgrade Settings", "UpgradeCantFail", true,
-                 new ConfigDescription("If true, upgrades cannot fail.", null, isAdminOnly));
+            AcceptableValueRange<float> floatRange = new AcceptableValueRange<float>(0, 1);
+            UpgradeChance = Config.Bind("Upgrade Settings", "01. Upgrade Chance", 1f,
+                new ConfigDescription("Chance for an upgrade to succeed.", floatRange, isAdminOnly));
+            BreakChance = Config.Bind("Upgrade Settings", "02. BreakChance", 0f,
+                new ConfigDescription("Chance for an upgrade to fail and break the item when failing the upgrade check, failing this check results in losing 1 level instead", floatRange, isAdminOnly));
 
             AcceptableValueRange<int> intRange = new AcceptableValueRange<int>(0, 1000);
 
-            CostStart = Config.Bind("Upgrade Settings", "CostStart", 1, new ConfigDescription("Base idol cost for upgrades. (Game Default is 1)", intRange, isAdminOnly));
-            CostIncreasePerInterval = Config.Bind("Upgrade Settings", "CostIncreasePerInterval", 1,
+            CostStart = Config.Bind("Upgrade Settings", "03. Cost Start", 1, new ConfigDescription("Base idol cost for upgrades. (Game Default is 1)", intRange, isAdminOnly));
+            CostIncreasePerInterval = Config.Bind("Upgrade Settings", "04. Cost Increase Per Interval", 1,
                 new ConfigDescription("Additional ingredient cost each time the cost scaling interval is reached starting at CostScalingLevelStart. (Starting at level X, the upgrade cost increases by this amount every Y levels. For example, with an increase of 1 every 2 levels starting at level 6: levels 1–5 cost 1, levels 6–7 cost 2, levels 8–9 cost 3, and so on.)", null, isAdminOnly));
-            CostIncreaseInterval = Config.Bind("Upgrade Settings", "CostIncreaseInterval", 2,
+            CostIncreaseInterval = Config.Bind("Upgrade Settings", "05. Cost Increase Interval", 2,
                 new ConfigDescription("Number of levels between each cost increase. Set to 0 to disable cost scaling.", intRange, isAdminOnly));
-            CostScalingLevelStart = Config.Bind("Upgrade Settings", "CostScalingLevelStart", 6,
+            CostScalingLevelStart = Config.Bind("Upgrade Settings", "06. Cost Scaling Level Start", 6,
                 new ConfigDescription("Level at which cost scaling starts.", intRange, isAdminOnly));
             
-            UpgradeBaseDuration = Config.Bind("Upgrade Settings", "UpgradeBaseDuration", 2f,
+            UpgradeBaseDuration = Config.Bind("Upgrade Settings", "07. Upgrade Base Duration", 2f,
                 new ConfigDescription("Base crafting duration for upgrading. (Game Default is 8)", null, isAdminOnly));
-            UpgradeDurationIncreasePerLevel = Config.Bind("Upgrade Settings", "UpgradeDurationIncreasePerLevel", 1f,
+            UpgradeDurationIncreasePerLevel = Config.Bind("Upgrade Settings", "08. Upgrade Duration Increase Per Level", 1f,
                 new ConfigDescription("Additional crafting duration per item level. (Game Default is 1)", null, isAdminOnly));
             //--------------
-            EnableBossProgression = Config.Bind("Boss Progression", "Enable Boss Progression", true,
+            EnableBossProgression = Config.Bind("Boss Progression", "01. Enable Boss Progression", true,
                 new ConfigDescription("If true, upgrades are limited by boss progression. Defeat bosses to unlock higher upgrade levels.", null, isAdminOnly));
-            BaseUpgradeLimit = Config.Bind("Boss Progression", "Base Upgrade Limit", 5,
+            BaseUpgradeLimit = Config.Bind("Boss Progression", "02. Base Upgrade Limit", 5,
                 new ConfigDescription("Base upgrade limit for all items before any additional calculations are made", null, isAdminOnly));
-            Boss1MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 1 Max Upgrade Level", 4, 
+            Boss1MaxUpgradeLevel = Config.Bind("Boss Progression", "03. Boss 1 Max Upgrade Level", 4, 
                 new ConfigDescription("Additional max upgrade level unlocked for wooden tier after defeating Eikthyr.", null, isAdminOnly));
-            Boss2MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 2 Max Upgrade Level", 4, 
+            Boss2MaxUpgradeLevel = Config.Bind("Boss Progression", "04. Boss 2 Max Upgrade Level", 4, 
                 new ConfigDescription("Additional max upgrade level unlocked for bronze tier and below after defeating Elder.", null, isAdminOnly));
-            Boss3MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 3 Max Upgrade Level", 4, 
+            Boss3MaxUpgradeLevel = Config.Bind("Boss Progression", "05. Boss 3 Max Upgrade Level", 4, 
                 new ConfigDescription("Additional max upgrade level unlocked for iron tier and below after defeating Bonemass.", null, isAdminOnly));
-            Boss4MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 4 Max Upgrade Level", 4, 
+            Boss4MaxUpgradeLevel = Config.Bind("Boss Progression", "06. Boss 4 Max Upgrade Level", 4, 
                 new ConfigDescription("Additional max upgrade level unlocked for silver tier and below after defeating Moder.", null, isAdminOnly));
-            Boss5MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 5 Max Upgrade Level", 4, 
+            Boss5MaxUpgradeLevel = Config.Bind("Boss Progression", "07. Boss 5 Max Upgrade Level", 4, 
                 new ConfigDescription("Additional max upgrade level unlocked for black metal tier and below after defeating Yagluth.", null, isAdminOnly));
-            Boss6MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 6 Max Upgrade Level", 4, 
+            Boss6MaxUpgradeLevel = Config.Bind("Boss Progression", "08. Boss 6 Max Upgrade Level", 4, 
                 new ConfigDescription("Additional max upgrade level unlocked for black marble tier and below after defeating Queen.", null, isAdminOnly));
-            Boss7MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 7 Max Upgrade Level", 4, 
+            Boss7MaxUpgradeLevel = Config.Bind("Boss Progression", "09. Boss 7 Max Upgrade Level", 4, 
                 new ConfigDescription("Additional max upgrade level unlocked for flametal tier and below after defeating Fader.", null, isAdminOnly));
-            Boss8MaxUpgradeLevel = Config.Bind("Boss Progression", "Boss 8 Max Upgrade Level", 100, 
+            Boss8MaxUpgradeLevel = Config.Bind("Boss Progression", "10. Boss 8 Max Upgrade Level", 100, 
                 new ConfigDescription("Additional max upgrade level unlocked for bloodgold tier and below after defeating Kall Fimbulbringer.", null, isAdminOnly));
             bossUpgradeValues = new Dictionary<int, int>()
             {
@@ -239,64 +242,64 @@ namespace ReforgedPotential
             };
 
             //--------------
-            Station_Global = Config.Bind("Crafting Station", "Global Station", "$piece_artisanstation",
+            Station_Global = Config.Bind("Crafting Station", "01. Global Station", "$piece_artisanstation",
                 new ConfigDescription("Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. '$piece_workbench') or prefab name. Empty = craftable by hand.", null, isAdminOnly));
             //--------------
-            EnableRecipes = Config.Bind("Recipes", "Enable Recipes", true,
+            EnableRecipes = Config.Bind("Recipes", "01. Enable Recipes", true,
                 new ConfigDescription("Enable or disable all idol crafting recipes.", null, isAdminOnly));
-            Recipe_Upgrader0Armor = Config.Bind("Recipes", "Wooden Protection Idol",
+            Recipe_Upgrader0Armor = Config.Bind("Recipes", "02. Wooden Protection Idol",
                 "FineWood:20,Tin:10,GreydwarfEye:10",
                 new ConfigDescription("Ingredients for Wooden Protection Idol: comma-separated entries 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader0Weapon = Config.Bind("Recipes", "Wooden Battle Idol",
+            Recipe_Upgrader0Weapon = Config.Bind("Recipes", "03. Wooden Battle Idol",
                 "FineWood:20,Tin:10,GreydwarfEye:10",
                 new ConfigDescription("Ingredients for Wooden Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
-            Recipe_Upgrader1Armor = Config.Bind("Recipes", "Bronze Protection Idol",
+            Recipe_Upgrader1Armor = Config.Bind("Recipes", "04. Bronze Protection Idol",
                 "Bronze:10,SurtlingCore:1",
                 new ConfigDescription("Ingredients for Bronze Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader1Weapon = Config.Bind("Recipes", "Bronze Battle Idol",
+            Recipe_Upgrader1Weapon = Config.Bind("Recipes", "05. Bronze Battle Idol",
                 "Bronze:10,SurtlingCore:1",
                 new ConfigDescription("Ingredients for Bronze Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
-            Recipe_Upgrader2Armor = Config.Bind("Recipes", "Iron Protection Idol",
+            Recipe_Upgrader2Armor = Config.Bind("Recipes", "06. Iron Protection Idol",
                 "Iron:10,ElderBark:5",
                 new ConfigDescription("Ingredients for Iron Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader2Weapon = Config.Bind("Recipes", "Iron Battle Idol",
+            Recipe_Upgrader2Weapon = Config.Bind("Recipes", "07. Iron Battle Idol",
                 "Iron:10,ElderBark:5",
                 new ConfigDescription("Ingredients for Iron Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
-            Recipe_Upgrader3Armor = Config.Bind("Recipes", "Silver Protection Idol",
+            Recipe_Upgrader3Armor = Config.Bind("Recipes", "08. Silver Protection Idol",
                 "Silver:10,FreezeGland:5,Obsidian:5",
                 new ConfigDescription("Ingredients for Silver Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader3Weapon = Config.Bind("Recipes", "Silver Battle Idol",
+            Recipe_Upgrader3Weapon = Config.Bind("Recipes", "09. Silver Battle Idol",
                 "Silver:10,FreezeGland:5,Obsidian:5",
                 new ConfigDescription("Ingredients for Silver Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
-            Recipe_Upgrader4Armor = Config.Bind("Recipes", "Black Metal Protection Idol",
+            Recipe_Upgrader4Armor = Config.Bind("Recipes", "10. Black Metal Protection Idol",
                 "BlackMetal:10,Needle:2,Tar:5",
                 new ConfigDescription("Ingredients for Black Metal Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader4Weapon = Config.Bind("Recipes", "Black Metal Battle Idol",
+            Recipe_Upgrader4Weapon = Config.Bind("Recipes", "11. Black Metal Battle Idol",
                 "BlackMetal:10,Needle:2,Tar:5",
                 new ConfigDescription("Ingredients for Black Metal Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
-            Recipe_Upgrader5Armor = Config.Bind("Recipes", "Black Marble Protection Idol",
+            Recipe_Upgrader5Armor = Config.Bind("Recipes", "12. Black Marble Protection Idol",
                 "BlackMarble:20,BugMeat:10,Carapace:10",
                 new ConfigDescription("Ingredients for Black Marble Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader5Weapon = Config.Bind("Recipes", "Black Marble Battle Idol",
+            Recipe_Upgrader5Weapon = Config.Bind("Recipes", "13. Black Marble Battle Idol",
                 "BlackMarble:20,BugMeat:10,Carapace:10",
                 new ConfigDescription("Ingredients for Black Marble Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
-            Recipe_Upgrader6Armor = Config.Bind("Recipes", "Flametal Protection Idol",
+            Recipe_Upgrader6Armor = Config.Bind("Recipes", "14. Flametal Protection Idol",
                 "FlametalNew:10,CharredBone:15",
                 new ConfigDescription("Ingredients for Flametal Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader6Weapon = Config.Bind("Recipes", "Flametal Battle Idol",
+            Recipe_Upgrader6Weapon = Config.Bind("Recipes", "15. Flametal Battle Idol",
                 "FlametalNew:10,CharredBone:15",
                 new ConfigDescription("Ingredients for Flametal Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
-            Recipe_Upgrader7Armor = Config.Bind("Recipes", "Bloodgold Protection Idol",
+            Recipe_Upgrader7Armor = Config.Bind("Recipes", "16. Bloodgold Protection Idol",
                 "Gold:10,Coins:40",
                 new ConfigDescription("Ingredients for Bloodgold Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader7Weapon = Config.Bind("Recipes", "Bloodgold Battle Idol",
+            Recipe_Upgrader7Weapon = Config.Bind("Recipes", "17. Bloodgold Battle Idol",
                 "Gold:10,Coins:40",
                 new ConfigDescription("Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
@@ -320,7 +323,6 @@ namespace ReforgedPotential
         {
             private static bool Prefix(object __instance, object player, out object __state)
             {
-                if (!UpgradeCantFail.Value) { __state = null; return true; } // not enabled; skip
                 __state = null;
                 try
                 {
@@ -341,7 +343,7 @@ namespace ReforgedPotential
                         }
                     }
 
-                    if (!flag) return true; // not an upgrader call; nothing to do
+                    if (!flag) return true;
 
                     // get m_craftRecipe from the InventoryGui instance
                     var igType = __instance.GetType();
@@ -356,7 +358,6 @@ namespace ReforgedPotential
 
                     var modified = new List<KeyValuePair<object, float>>();
 
-                    // find the upgrader requirement and modify its shared.m_upgradeChance
                     foreach (var req in resources)
                     {
                         if (req == null) continue;
@@ -379,14 +380,17 @@ namespace ReforgedPotential
 
                         var sharedType = sharedObj.GetType();
                         var upgradeChanceField = sharedType.GetField("m_upgradeChance", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                        var breakChanceField = sharedType.GetField("m_breakChance", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                         if (upgradeChanceField == null) continue;
+                        if (breakChanceField == null) continue;
 
                         try
                         {
                             float original = Convert.ToSingle(upgradeChanceField.GetValue(sharedObj));
                             modified.Add(new KeyValuePair<object, float>(sharedObj, original));
-                            // set to 100%
-                            upgradeChanceField.SetValue(sharedObj, 1f);
+                            upgradeChanceField.SetValue(sharedObj, UpgradeChance.Value);
+                            breakChanceField?.SetValue(sharedObj, BreakChance.Value);
+
                         }
                         catch { /* ignore individual failures and continue */ }
                     }
