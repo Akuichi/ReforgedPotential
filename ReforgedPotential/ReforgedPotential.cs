@@ -5,6 +5,7 @@ using Jotunn.Entities;
 using Jotunn.Managers;
 using Jotunn.Utils;
 using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -13,6 +14,8 @@ using System.Reflection.Emit;
 using System.Runtime.Remoting.Messaging;
 using System.Text;
 using UnityEngine;
+using UnityEngine.UI;
+using UnityEngine.UIElements;
 using UnityEngine.Windows;
 using static System.Net.Mime.MediaTypeNames;
 using static Version;
@@ -101,14 +104,62 @@ namespace ReforgedPotential
 
         internal static ConfigEntry<float> UpgradeBaseDuration;
         internal static ConfigEntry<float> UpgradeDurationIncreasePerLevel;
+        public static CustomRPC RPC_Reforged;
+
+        public static ConfigEntry<bool> EnableGlobalUpgradeNotifications;
+        public static ConfigEntry<string> SuccessMessage;
+        public static ConfigEntry<string> FailedMessage;
 
         private void Awake()
         {
+            RPC_Reforged = NetworkManager.Instance.AddRPC("RPC_Reforged", RPC_ReforgedServerReceive, RPC_ReforgedClientReceive);
             InitConfig();
             CreateConfigWatcher();
             harmony.PatchAll();
         }
+        private IEnumerator RPC_ReforgedServerReceive(long sender, ZPackage package)
+        {
+            Jotunn.Logger.LogMessage($"Received blob, processing");
 
+            Jotunn.Logger.LogMessage($"Broadcasting to all clients");
+            RPC_Reforged.SendPackage(ZNet.instance.m_peers, new ZPackage(package.GetArray()));
+            string message = package.ReadString();
+            if (message != "")
+            { // Make sure it isn't empty
+                Jotunn.Logger.LogDebug($"Adding message to chat: {message}");
+                Chat.instance.AddString("Forge of Potential", message, Talker.Type.Shout);
+            }
+            yield return null;
+        }
+
+        private IEnumerator RPC_ReforgedClientReceive(long sender, ZPackage package)
+        {
+            Jotunn.Logger.LogMessage($"Received blob, processing");
+            string message = package.ReadString();
+            if (message != "")
+            { // Make sure it isn't empty
+                Chat.instance.AddString("Forge of Potential", message, Talker.Type.Shout);
+            }
+            yield return null;
+        }
+
+        public static void BroadcastUpgradeResult(string playerName, string itemName, int level, bool success)
+        {
+            if (!EnableGlobalUpgradeNotifications.Value) return;
+
+            string template = success
+                ? SuccessMessage.Value
+                : FailedMessage.Value;
+
+            string message = template
+                .Replace("{PlayerName}", playerName)
+                .Replace("{ItemName}", itemName)
+                .Replace("{Level}", level.ToString());
+            ZPackage package = new ZPackage();
+            package.Write(message);
+            Jotunn.Logger.LogDebug($"Broadcasting upgrade result: {message}");
+            RPC_Reforged.SendPackage(ZRoutedRpc.instance.GetServerPeerID(), package);
+        }
         private void CreateConfigWatcher()
         {
             // Create config file watcher
@@ -121,13 +172,21 @@ namespace ReforgedPotential
                 InitConfig();
             };
         }
-
         private void InitConfig()
         {
             Config.SaveOnConfigSet = true;
             ConfigurationManagerAttributes isAdminOnly = new ConfigurationManagerAttributes { IsAdminOnly = true };
             EnableServerSync = Config.Bind("Server Only", "Enable Server Sync", true, new ConfigDescription("If true, config values are synchronized from server to clients.", null, isAdminOnly));
             isAdminOnly = new ConfigurationManagerAttributes { IsAdminOnly = EnableServerSync.Value };
+            //-------------
+            EnableGlobalUpgradeNotifications = Config.Bind("Global Notifications","Enable Global Upgrade Notifications",true,
+                new ConfigDescription("Broadcast a message to all online players when someone attempts an upgrade.", null, isAdminOnly));
+
+            SuccessMessage = Config.Bind("Global Notifications","Success Message","Hidden Forge: '{PlayerName}' successfully upgraded '{ItemName}' to level '{Level}'.",
+                new ConfigDescription("Message shown on successful upgrade. Supports {PlayerName}, {ItemName}, {Level}.", null, isAdminOnly));
+
+            FailedMessage = Config.Bind("Global Notifications","Failed Message","Hidden Forge: '{PlayerName}' tried to upgrade '{ItemName}' to level '{Level}', but failed.",
+                new ConfigDescription("Message shown on failed upgrade. Supports {PlayerName}, {ItemName}, {Level}.", null, isAdminOnly));
             //----------------
             UpgradeCantFail = Config.Bind("Upgrade Settings", "UpgradeCantFail", true,
                  new ConfigDescription("If true, upgrades cannot fail.", null, isAdminOnly));
@@ -244,6 +303,7 @@ namespace ReforgedPotential
         }
         
 
+
         [HarmonyPatch(typeof(InventoryGui), "SetupCrafting")]
         private class InventoryGuiCraftSpeedPatches
         {
@@ -254,8 +314,6 @@ namespace ReforgedPotential
                 ___m_upgraderDurationPerLevel = UpgradeDurationIncreasePerLevel.Value;
             }
         }
-
-
 
         [HarmonyPatch(typeof(InventoryGui), "DoCrafting")]
         private class UpgradePatch
@@ -342,8 +400,6 @@ namespace ReforgedPotential
                 {
                     // swallow or log as desired
                 }
-
-                // continue to original DoCrafting
                 return true;
             }
         }
