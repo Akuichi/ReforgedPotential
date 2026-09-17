@@ -70,6 +70,8 @@ namespace ReforgedPotential
             { 8, "Kall Fimbulbringer" }
         };
 
+        internal static ConfigEntry<bool> EnableRecipes;
+
         internal static ConfigEntry<string> Recipe_Upgrader0Armor;
         internal static ConfigEntry<string> Recipe_Upgrader0Weapon;
         internal static ConfigEntry<string> Recipe_Upgrader1Armor;
@@ -164,6 +166,8 @@ namespace ReforgedPotential
             Station_Global = Config.Bind("Crafting Station", "Global Station", "$piece_artisanstation",
                 new ConfigDescription("Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. '$piece_workbench') or prefab name. Empty = craftable by hand.", null, isAdminOnly));
             //--------------
+            EnableRecipes = Config.Bind("Recipes", "Enable Recipes", true,
+                new ConfigDescription("Enable or disable all idol crafting recipes.", null, isAdminOnly));
             Recipe_Upgrader0Armor = Config.Bind("Recipes", "Wooden Protection Idol",
                 "FineWood:20,Tin:10,GreydwarfEye:10",
                 new ConfigDescription("Ingredients for Wooden Protection Idol: comma-separated entries 'PrefabName:Amount'.", null, isAdminOnly));
@@ -363,6 +367,12 @@ namespace ReforgedPotential
                     if (__instance == null)
                     {
                         Debug.LogWarning($"{LogPrefix}ObjectDB instance is null.");
+                        return;
+                    }
+
+                    if (!EnableRecipes.Value)
+                    {
+                        Debug.Log($"{LogPrefix}Idol crafting recipes are disabled.");
                         return;
                     }
 
