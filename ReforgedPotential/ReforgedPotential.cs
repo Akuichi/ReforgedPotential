@@ -183,15 +183,18 @@ namespace ReforgedPotential
             EnableServerSync = Config.Bind("Server Only", "01. Enable Server Sync", true, new ConfigDescription("If true, config values are synchronized from server to clients.", null, isAdminOnly));
             isAdminOnly = new ConfigurationManagerAttributes { IsAdminOnly = EnableServerSync.Value };
             //-------------
-            EnableGlobalUpgradeNotifications = Config.Bind("Global Notifications","01. Enable Global Upgrade Notifications",true,
+            #region Global Notifications
+            EnableGlobalUpgradeNotifications = Config.Bind("Global Notifications","01. Enable Global Upgrade Notifications",false,
                 new ConfigDescription("Broadcast a message to all online players when someone attempts an upgrade.", null, isAdminOnly));
 
-            SuccessMessage = Config.Bind("Global Notifications","02. Success Message","Hidden Forge: '{PlayerName}' successfully upgraded '{ItemName}' to level '{Level}'.",
+            SuccessMessage = Config.Bind("Global Notifications","02. Success Message","'{PlayerName}' successfully upgraded '{ItemName}' to level '{Level}'.",
                 new ConfigDescription("Message shown on successful upgrade. Supports {PlayerName}, {ItemName}, {Level}.", null, isAdminOnly));
 
-            FailedMessage = Config.Bind("Global Notifications","03. Failed Message","Hidden Forge: '{PlayerName}' tried to upgrade '{ItemName}' to level '{Level}', but failed.",
+            FailedMessage = Config.Bind("Global Notifications","03. Failed Message","'{PlayerName}' tried to upgrade '{ItemName}' to level '{Level}', but failed.",
                 new ConfigDescription("Message shown on failed upgrade. Supports {PlayerName}, {ItemName}, {Level}.", null, isAdminOnly));
+            #endregion
             //----------------
+            #region Upgrade Settings
             AcceptableValueRange<float> floatRange = new AcceptableValueRange<float>(0, 1);
             UpgradeChance = Config.Bind("Upgrade Settings", "01. Upgrade Chance", 1f,
                 new ConfigDescription("Chance for an upgrade to succeed.", floatRange, isAdminOnly));
@@ -212,7 +215,9 @@ namespace ReforgedPotential
                 new ConfigDescription("Base crafting duration for upgrading. (Game Default is 8)", null, isAdminOnly));
             UpgradeDurationIncreasePerLevel = Config.Bind("Upgrade Settings", "08. Upgrade Duration Increase Per Level", 1f,
                 new ConfigDescription("Additional crafting duration per item level. (Game Default is 1)", null, isAdminOnly));
+            #endregion
             //--------------
+            #region Boss Progression
             EnableBossProgression = Config.Bind("Boss Progression", "01. Enable Boss Progression", true,
                 new ConfigDescription("If true, upgrades are limited by boss progression. Defeat bosses to unlock higher upgrade levels.", null, isAdminOnly));
             BaseUpgradeLimit = Config.Bind("Boss Progression", "02. Base Upgrade Limit", 5,
@@ -244,11 +249,12 @@ namespace ReforgedPotential
                 { 7, Boss7MaxUpgradeLevel.Value },
                 { 8, Boss8MaxUpgradeLevel.Value }
             };
-
+            #endregion
             //--------------
             Station_Global = Config.Bind("Crafting Station", "01. Global Station", "$piece_artisanstation",
                 new ConfigDescription("Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. '$piece_workbench') or prefab name. Empty = craftable by hand.", null, isAdminOnly));
             //--------------
+            #region Recipes
             EnableRecipes = Config.Bind("Recipes", "01. Enable Recipes", true,
                 new ConfigDescription("Enable or disable all idol crafting recipes.", null, isAdminOnly));
             Recipe_Upgrader0Armor = Config.Bind("Recipes", "02. Wooden Protection Idol",
@@ -306,6 +312,7 @@ namespace ReforgedPotential
             Recipe_Upgrader7Weapon = Config.Bind("Recipes", "17. Bloodgold Battle Idol",
                 "Gold:10,Coins:40",
                 new ConfigDescription("Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
+            #endregion
 
         }
 
