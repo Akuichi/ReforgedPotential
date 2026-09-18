@@ -63,6 +63,7 @@ namespace ReforgedPotential
         internal static Dictionary<int, string> bossNames = new Dictionary<int, string>()
         {
             { -1, "No More Further Boss" },
+            { 0, "No Boss Defeated" },
             { 1, "Eikthyr" },
             { 2, "Elder" },
             { 3, "Bonemass" },
@@ -128,7 +129,8 @@ namespace ReforgedPotential
             string message = package.ReadString();
             if (message != "")
             { // Make sure it isn't empty
-                Jotunn.Logger.LogDebug($"Adding message to chat: {message}");
+                Jotunn.Logger.LogDebug($"[SERVER] Adding message to chat: {message}");
+                ChatHelpers.ResetChatHideTimer();
                 Chat.instance.AddString("Forge of Potential", message, Talker.Type.Shout);
             }
             yield return null;
@@ -140,6 +142,7 @@ namespace ReforgedPotential
             string message = package.ReadString();
             if (message != "")
             { // Make sure it isn't empty
+                ChatHelpers.ResetChatHideTimer();
                 Chat.instance.AddString("Forge of Potential", message, Talker.Type.Shout);
             }
             yield return null;
@@ -161,6 +164,25 @@ namespace ReforgedPotential
             package.Write(message);
             Jotunn.Logger.LogDebug($"Broadcasting upgrade result: {message}");
             RPC_Reforged.SendPackage(ZRoutedRpc.instance.GetServerPeerID(), package);
+        }
+
+        // Reflection helper to set Chat.instance.m_hideTimer = 0
+        public static class ChatHelpers
+        {
+            public static void ResetChatHideTimer()
+            {
+                try
+                {
+                    var chat = Chat.instance;
+                    if (chat == null) return;
+                    var field = typeof(Chat).GetField("m_hideTimer", BindingFlags.Instance | BindingFlags.NonPublic);
+                    if (field != null)
+                    {
+                        field.SetValue(chat, 0f);
+                    }
+                }
+                catch { /* non-critical */ }
+            }
         }
 
         #endregion
@@ -240,6 +262,7 @@ namespace ReforgedPotential
                 new ConfigDescription("Additional max upgrade level unlocked for bloodgold tier and below after defeating Kall Fimbulbringer.", null, isAdminOnly));
             bossUpgradeValues = new Dictionary<int, int>()
             {
+                { 0, 0 }, // No boss defeated
                 { 1, Boss1MaxUpgradeLevel.Value },
                 { 2, Boss2MaxUpgradeLevel.Value },
                 { 3, Boss3MaxUpgradeLevel.Value },
@@ -478,7 +501,7 @@ namespace ReforgedPotential
                     try { afterSnap = CaptureInventory(player); } catch { afterSnap = new InventorySnapshot(); }
 
                     var outcome = AnalyzeUpgradeResult(__state.Snapshot, __state.InventoryBefore ?? new InventorySnapshot(), afterSnap, __state.ReturnIngredientNames ?? Enumerable.Empty<string>());
-
+                    
                     string playerName = "<unknown>";
                     try
                     {
@@ -567,8 +590,10 @@ namespace ReforgedPotential
 
                     // success = true when upgraded, false otherwise
                     bool success = outcome == UpgradeOutcome.Upgraded;
-
-                    // Broadcast the result to server/clients using your RPC method
+                    if (!success)
+                    {
+                        reportedLevel = (__state.Snapshot?.OriginalQuality ?? 0) + 1;
+                    }
                     BroadcastUpgradeResult(playerName, itemName, reportedLevel, success);
                 }
                 catch (Exception ex)
@@ -770,16 +795,15 @@ namespace ReforgedPotential
                     var recipe = recipeProp?.GetValue(selPair) as Recipe;
                     var item = itemProp?.GetValue(selPair) as ItemDrop.ItemData;
 
-                    if (recipe == null) return true; // nothing to do
+                    if (recipe == null) return true;
 
-                    // Example condition: if player is at an upgrader and the recipe contains an upgrader resource -> block
                     var player = Player.m_localPlayer;
                     var station = player?.GetCurrentCraftingStation();
                     bool atUpgrader = station != null && station.m_upgrader;
 
                     if (atUpgrader && item != null)
                     {
-                        foreach (var req in recipe.m_resources ?? new Piece.Requirement[0])
+                        foreach (var req in recipe.m_resources ?? Array.Empty<Piece.Requirement>())
                         {
                             if (req == null || req.m_resItem == null) continue;
 
@@ -795,16 +819,54 @@ namespace ReforgedPotential
                                 Jotunn.Logger.LogDebug($"Iterating resources needed to upgrade for {item.m_shared.m_name} " + $"found upgrader resource: {prefabId}.");
                             }
 
-                            int maxTier = GetMaxBossTier();
-                            int itemTier = GetEquipmentTier(prefabId);
-                            int maxUpgradeLevel = GetMaxUpgradeLevel(itemTier, maxTier);
-
-                            if (item.m_quality >= maxUpgradeLevel)
+                            int highestBossTier = UpgradeHelper.GetMaxBossTier();
+                            originalRequirements.TryGetValue(recipe.m_item.name, out var originalResource);
+                            int itemTier = UpgradeHelper.GetEquipmentTier(originalResource);
+                            if (itemTier < 0)
                             {
-                                int requiredBoss = GetRequiredBossForNextUpgrade(itemTier, item.m_quality);
-                                Jotunn.Logger.LogDebug($"Player attempted to upgrade {item.m_shared.m_name} " + $"to quality {item.m_quality + 1}, " +
-                                    $"but max allowed is {maxUpgradeLevel}. " + $"Required boss: {bossNames[requiredBoss]}");
-                                player?.Message(MessageHud.MessageType.Center, requiredBoss != -1 ? $"Defeat {bossNames[requiredBoss]} to upgrade this weapon further." : "Max upgrade level reached!");
+                                Jotunn.Logger.LogWarning(
+                                    $"Could not determine equipment tier for upgrader '{originalResource}'.");
+
+                                continue;
+                            }
+                            int maxUpgradeLevel = UpgradeHelper.GetMaxUpgradeLevel(itemTier, highestBossTier);
+                            var itemQuality = item.m_quality;
+
+                            // Quality is starts from level 1 unlike the item tiers
+                            // If current quality is already at the maximum,
+                            // the attempted next upgrade is not allowed.
+                            if (itemQuality >= maxUpgradeLevel)
+                            {
+                                int requiredBoss = UpgradeHelper.GetRequiredBossForNextUpgrade(itemTier,itemQuality);
+
+                                Jotunn.Logger.LogDebug(
+                                    $"Player attempted to upgrade {item.m_shared.m_name} " +
+                                    $"from quality {itemQuality} to {itemQuality + 1}. " +
+                                    $"Item tier={itemTier}, " +
+                                    $"highest boss tier={highestBossTier}, " +
+                                    $"max allowed={maxUpgradeLevel}, " +
+                                    $"required boss={requiredBoss}.");
+
+                                string requiredBossName =
+                                    requiredBoss != -1 &&
+                                    bossNames.TryGetValue(requiredBoss, out string bossName)
+                                        ? bossName
+                                        : null;
+
+                                Jotunn.Logger.LogDebug(
+                                    $"Player attempted to upgrade {item.m_shared.m_name} " +
+                                    $"from quality {itemQuality} to {itemQuality + 1}. " +
+                                    $"Item tier={itemTier}, " +
+                                    $"highest boss tier={highestBossTier}, " +
+                                    $"max allowed={maxUpgradeLevel}, " +
+                                    $"required boss={requiredBossName ?? "none"}.");
+
+                                player?.Message(
+                                    MessageHud.MessageType.Center,
+                                    requiredBossName != null
+                                        ? $"Defeat {requiredBossName} to upgrade this weapon further."
+                                        : "Max upgrade level reached!");
+
                                 return false;
                             }
                             return true;
@@ -821,107 +883,179 @@ namespace ReforgedPotential
                 // return true -> run original OnCraftPressed
                 return true;
             }
-
-            #region Upgrade Helpers
-            static int GetMaxBossTier()
-            {
-                if (ZoneSystem.instance.CheckKey(Boss7Key, GameKeyType.Player))
-                    return 7;
-                if (ZoneSystem.instance.CheckKey(Boss6Key, GameKeyType.Player))
-                    return 6;
-                if (ZoneSystem.instance.CheckKey(Boss5Key, GameKeyType.Player))
-                    return 5;
-                if (ZoneSystem.instance.CheckKey(Boss4Key, GameKeyType.Player))
-                    return 4;
-                if (ZoneSystem.instance.CheckKey(Boss3Key, GameKeyType.Player))
-                    return 3;
-                if (ZoneSystem.instance.CheckKey(Boss2Key, GameKeyType.Player))
-                    return 2;
-                if (ZoneSystem.instance.CheckKey(Boss1Key, GameKeyType.Player))
-                    return 1;
-                return 0; // no bosses defeated
-            }
-            static int GetEquipmentTier(string prefabName)
-            {
-                if (string.IsNullOrEmpty(prefabName)) return 0;
-                if (prefabName.Contains("Upgrader7")) return 8;
-                if (prefabName.Contains("Upgrader6")) return 7;
-                if (prefabName.Contains("Upgrader5")) return 6;
-                if (prefabName.Contains("Upgrader4")) return 5;
-                if (prefabName.Contains("Upgrader3")) return 4;
-                if (prefabName.Contains("Upgrader2")) return 3;
-                if (prefabName.Contains("Upgrader1")) return 2;
-                if (prefabName.Contains("Upgrader0")) return 1;
-                return -1; // unknown
-            }
-            static int GetMaxUpgradeLevel(int itemTier, int highestBossTier)
-            {
-                int maxUpgrade = BaseUpgradeLimit.Value;
-
-                for (int bossTier = itemTier; bossTier <= highestBossTier; bossTier++)
-                {
-                    if (bossUpgradeValues.TryGetValue(bossTier, out int upgradeAmount))
-                    {
-                        maxUpgrade += upgradeAmount;
-                    }
-                }
-                if (itemTier == highestBossTier + 1)
-                {
-                    maxUpgrade += 1;
-                    Jotunn.Logger.LogDebug($"GetMaxUpgradeLevel: itemTier={itemTier} is equal to highestBossTier={highestBossTier}, adding +1 to maxUpgrade.");
-                }
-                Jotunn.Logger.LogDebug($"GetMaxUpgradeLevel: itemTier={itemTier}, highestBossTier={highestBossTier}, maxUpgrade={maxUpgrade}");
-                return maxUpgrade;
-            }
-            static int GetRequiredBossForNextUpgrade(int itemTier, int currentUpgrade)
-            {
-                int cumulativeUpgrade = BaseUpgradeLimit.Value;
-                Jotunn.Logger.LogDebug($"GetRequiredBossForNextUpgrade: itemTier={itemTier}, currentUpgrade={currentUpgrade}, base={cumulativeUpgrade}");
-
-                for (int bossTier = itemTier; bossUpgradeValues.ContainsKey(bossTier); bossTier++)
-                {
-                    int bossValue = bossUpgradeValues[bossTier];
-                    cumulativeUpgrade += bossValue;
-                    string bossName = bossNames.ContainsKey(bossTier) ? bossNames[bossTier] : "<unknown>";
-                    Jotunn.Logger.LogWarning($"Checking bossTier={bossTier}, bossValue={bossValue}, cumulativeUpgrade={cumulativeUpgrade} (bossName={bossName})");
-
-                    if (currentUpgrade < cumulativeUpgrade)
-                    {
-                        Jotunn.Logger.LogDebug($"Next required bossTier={bossTier} ({bossName}) to unlock upgrades beyond {currentUpgrade}.");
-                        return bossTier;
-                    }
-                }
-
-                Jotunn.Logger.LogDebug($"No boss tier found that unlocks upgrades beyond currentUpgrade={currentUpgrade}. cumulativeUpgrade={cumulativeUpgrade}");
-                return -1;
-            }
-            #endregion
-        }
-
-        [HarmonyPatch(typeof(Piece.Requirement))]
-        static class Requirement_GetAmount_Patch
-        {
+            static Dictionary<string, string> originalRequirements = new Dictionary<string, string>();
+            static int currentEquivalentTier;
             [HarmonyPostfix]
-            [HarmonyPatch(nameof(Piece.Requirement.GetAmount))]
-            static void GetAmountPostfix(Piece.Requirement __instance, int qualityLevel, ref int __result)
+            [HarmonyPatch(nameof(InventoryGui.SetRecipe))]
+            static void SetRecipePostfix()
             {
-                if (__instance == null) return;
-
-                if (!__instance.m_upgraderResource) return;
-                int level = qualityLevel - 1;
-                int costStartLevel = Math.Max(1, CostScalingLevelStart.Value);
-                int cost = CostStart.Value;
-
-                if (CostIncreaseInterval.Value > 0 && level >= costStartLevel)
+                try
                 {
-                    cost += ((level - costStartLevel)
-                        / CostIncreaseInterval.Value + 1)
-                        * CostIncreasePerInterval.Value;
-                }
+                    var selectedRecipePair = GetSelectedRecipe();
+                    var selectedRecipe = selectedRecipePair.recipe;
+                    var selectedItemData = selectedRecipePair.itemData;
+                    if (!originalRequirements.ContainsKey(selectedRecipe.m_item.name))
+                    {
+                        originalRequirements.Add(selectedRecipe.m_item.name, selectedRecipe.m_resources.FirstOrDefault(r => r.m_upgraderResource).m_resItem.name);
+                        originalRequirements.TryGetValue(selectedRecipe.m_item.name, out var originalResource);
+                        Jotunn.Logger.LogDebug($"SetRecipePostfix: Storing original upgrader resource for {selectedItemData.m_shared.m_name} as {originalResource}");
+                    }
+                    if (selectedRecipe == null || selectedItemData == null)
+                    {
+                        Jotunn.Logger.LogDebug($"SetRecipePostfix: No selected recipe or item data found.");
+                        return;
+                    }
+                    else
+                    {
+                        // Restore original upgrader resource if it exists
+                        for (int i = 0; selectedRecipe.m_resources.Length > i; i++)
+                        {
+                            if (selectedRecipe.m_resources[i].m_upgraderResource)
+                            {
+                                if(originalRequirements.TryGetValue(selectedRecipe.m_item.name, out var resource))
+                                {
+                                    Jotunn.Logger.LogDebug($"SetRecipePostfix: Found upgrader resource for {selectedItemData.m_shared.m_name}: {resource}");
+                                    int configuredMaxBoss = (bossUpgradeValues != null && bossUpgradeValues.Count > 0) ? bossUpgradeValues.Keys.Max() : 8;
+                                    var selectedResource = selectedRecipe.m_resources[i];
+                                    int qualityLevel = selectedItemData.m_quality;
+                                    int baseTier = UpgradeHelper.GetEquipmentTier(resource);
+                                    // find equivalent tier & equivalent quality
+                                    int equivTier = UpgradeHelper.GetEquivalentTier(baseTier, qualityLevel, configuredMaxBoss);
+                                    currentEquivalentTier = equivTier;
+                                    int baseMax = UpgradeHelper.GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
+                                    int candidateMax = UpgradeHelper.GetMaxUpgradeLevel(equivTier, configuredMaxBoss);
+                                    int distanceFromMax = baseMax - qualityLevel;
+                                    int candidateQuality = candidateMax - distanceFromMax;
+                                    Jotunn.Logger.LogDebug($"SetRecipePostfix: Base tier {baseTier}, quality {qualityLevel}, equivalent tier {equivTier}.");
 
-                __result = cost;
+                                    // clamp candidateQuality to valid range
+                                    candidateQuality = Math.Max(1, Math.Min(candidateMax, candidateQuality));
+
+                                    // compute cost using per-tier level (candidateQuality)
+                                    int level = candidateQuality - 1;
+                                    int costStartLevel = Math.Max(1, CostScalingLevelStart.Value);
+                                    int cost = CostStart.Value;
+                                    if (CostIncreaseInterval.Value > 0 && level >= costStartLevel)
+                                    {
+                                        cost += ((level - costStartLevel)
+                                            / CostIncreaseInterval.Value + 1)
+                                            * CostIncreasePerInterval.Value;
+                                    }
+
+                                    if (selectedResource.m_resItem.name.Contains("Weapon"))
+                                    {
+                                        Jotunn.Logger.LogDebug($"SetRecipePostfix: Selected resource is a weapon. Setting cost to {cost}.");
+                                        var prefab = ObjectDB.instance.GetItemPrefab($"Upgrader{equivTier}Weapon");
+                                        if (prefab.TryGetComponent(out ItemDrop itemDrop))
+                                        {
+                                            Jotunn.Logger.LogDebug($"SetRecipePostfix: Found prefab for Upgrader{equivTier}Weapon. Setting resource to {itemDrop.name} with amount {cost}.");
+                                            selectedResource.m_resItem = itemDrop;
+                                            selectedResource.m_amount = cost;
+                                        }
+
+                                    }
+                                    else if (selectedResource.m_resItem.name.Contains("Armor"))
+                                    {
+                                        Jotunn.Logger.LogDebug($"SetRecipePostfix: Selected resource is armor. Setting cost to {cost}.");
+                                        var prefab = ObjectDB.instance.GetItemPrefab($"Upgrader{equivTier}Armor");
+                                        if (prefab.TryGetComponent(out ItemDrop itemDrop))
+                                        {
+                                            Jotunn.Logger.LogDebug($"SetRecipePostfix: Found prefab for Upgrader{equivTier}Armor. Setting resource to {itemDrop.name} with amount {cost}.");
+                                            selectedResource.m_resItem = itemDrop;
+                                            selectedResource.m_amount = cost;
+                                        }
+                                    }
+                                    else
+                                    {
+                                        Jotunn.Logger.LogDebug($"SetRecipePostfix: Selected resource is neither weapon nor armor. Setting cost to {cost}.");
+                                    }
+                                }
+                            }
+                        }
+
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Jotunn.Logger.LogWarning($"SetRecipePostfix postfix exception: {ex}");
+                    // fall through and run original on error
+                }
+                return;
             }
+
+            static object GetSelectedRecipePair()
+            {
+                var invGuiType = typeof(InventoryGui);
+                var instanceProp = invGuiType.GetProperty("instance", BindingFlags.Static | BindingFlags.Public);
+                var invGui = instanceProp?.GetValue(null);
+                if (invGui == null) return null;
+
+                var selField = invGuiType.GetField("m_selectedRecipe", BindingFlags.Instance | BindingFlags.NonPublic);
+                return selField?.GetValue(invGui);
+            }
+
+            static (Recipe recipe, ItemDrop.ItemData itemData) GetSelectedRecipe()
+            {
+                var selPair = GetSelectedRecipePair();
+                if (selPair == null) return (null, null);
+
+                var pairType = selPair.GetType();
+                var recipeProp = pairType.GetProperty("Recipe", BindingFlags.Instance | BindingFlags.Public);
+                var itemProp = pairType.GetProperty("ItemData", BindingFlags.Instance | BindingFlags.Public);
+
+                var recipe = recipeProp?.GetValue(selPair) as Recipe;
+                var item = itemProp?.GetValue(selPair) as ItemDrop.ItemData;
+                return (recipe, item);
+            }
+
         }
+
+        //    [HarmonyPostfix]
+        //    [HarmonyPatch(nameof(Piece.Requirement.GetAmount))]
+        //    static void GetAmountPostfix(Piece.Requirement __instance, int qualityLevel, ref int __result)
+        //    {
+        //        if (__instance == null) return;
+
+        //        if (!__instance.m_upgraderResource) return;
+        //        int level = qualityLevel - 1;
+        //        int costStartLevel = Math.Max(1, CostScalingLevelStart.Value);
+        //        int cost = CostStart.Value;
+
+        //        if (CostIncreaseInterval.Value > 0 && level >= costStartLevel)
+        //        {
+        //            cost += ((level - costStartLevel)
+        //                / CostIncreaseInterval.Value + 1)
+        //                * CostIncreasePerInterval.Value;
+        //        }
+
+        //        __result = cost;
+        //    }
+
+        //    static object GetSelectedRecipePair()
+        //    {
+        //        var invGuiType = typeof(InventoryGui);
+        //        var instanceProp = invGuiType.GetProperty("instance", BindingFlags.Static | BindingFlags.Public);
+        //        var invGui = instanceProp?.GetValue(null);
+        //        if (invGui == null) return null;
+
+        //        var selField = invGuiType.GetField("m_selectedRecipe", BindingFlags.Instance | BindingFlags.NonPublic);
+        //        return selField?.GetValue(invGui);
+        //    }
+
+        //    static (Recipe recipe, ItemDrop.ItemData itemData) GetSelectedRecipe()
+        //    {
+        //        var selPair = GetSelectedRecipePair();
+        //        if (selPair == null) return (null, null);
+
+        //        var pairType = selPair.GetType();
+        //        var recipeProp = pairType.GetProperty("Recipe", BindingFlags.Instance | BindingFlags.Public);
+        //        var itemProp = pairType.GetProperty("ItemData", BindingFlags.Instance | BindingFlags.Public);
+
+        //        var recipe = recipeProp?.GetValue(selPair) as Recipe;
+        //        var item = itemProp?.GetValue(selPair) as ItemDrop.ItemData;
+        //        return (recipe, item);
+        //    }
+        //}
 
         [HarmonyPatch(typeof(ObjectDB))]
         static class ObjectDBPatch
@@ -1196,5 +1330,157 @@ namespace ReforgedPotential
                 return "<unknown>";
             }
         }
+
+        #region Upgrade Helpers
+        public static class UpgradeHelper
+        {
+            public static int GetMaxBossTier()
+            {
+                if (ZoneSystem.instance.CheckKey(Boss7Key, GameKeyType.Player))
+                    return 7;
+                if (ZoneSystem.instance.CheckKey(Boss6Key, GameKeyType.Player))
+                    return 6;
+                if (ZoneSystem.instance.CheckKey(Boss5Key, GameKeyType.Player))
+                    return 5;
+                if (ZoneSystem.instance.CheckKey(Boss4Key, GameKeyType.Player))
+                    return 4;
+                if (ZoneSystem.instance.CheckKey(Boss3Key, GameKeyType.Player))
+                    return 3;
+                if (ZoneSystem.instance.CheckKey(Boss2Key, GameKeyType.Player))
+                    return 2;
+                if (ZoneSystem.instance.CheckKey(Boss1Key, GameKeyType.Player))
+                    return 1;
+                return 0; // no bosses defeated
+            }
+            public static int GetEquipmentTier(string prefabName)
+            {
+                if (string.IsNullOrEmpty(prefabName)) return -2;
+                if (prefabName.Contains("Upgrader7")) return 7;
+                if (prefabName.Contains("Upgrader6")) return 6;
+                if (prefabName.Contains("Upgrader5")) return 5;
+                if (prefabName.Contains("Upgrader4")) return 4;
+                if (prefabName.Contains("Upgrader3")) return 3;
+                if (prefabName.Contains("Upgrader2")) return 2;
+                if (prefabName.Contains("Upgrader1")) return 1;
+                if (prefabName.Contains("Upgrader0")) return 0;
+                return -1; // unknown
+            }
+            public static int GetMaxUpgradeLevel(int itemTier, int highestBossTier)
+            {
+                int maxUpgrade = BaseUpgradeLimit.Value;
+                int firstRelevantBossTier = itemTier + 1;
+
+                for (int bossTier = firstRelevantBossTier;
+                     bossTier <= highestBossTier;
+                     bossTier++)
+                {
+                    if (bossUpgradeValues.TryGetValue(bossTier, out int upgradeAmount))
+                    {
+                        maxUpgrade += upgradeAmount;
+                    }
+                }
+
+                // If the equipment tier matches the highest defeated boss tier,alow one additional upgrade for that tier
+                if (itemTier == highestBossTier)
+                {
+                    maxUpgrade += 1;
+
+                    Jotunn.Logger.LogDebug(
+                        $"GetMaxUpgradeLevel: itemTier={itemTier} matches " +
+                        $"highestBossTier={highestBossTier}, adding +1.");
+                }
+
+                Jotunn.Logger.LogDebug(
+                    $"GetMaxUpgradeLevel: itemTier={itemTier}, " +
+                    $"highestBossTier={highestBossTier}, " +
+                    $"maxUpgrade={maxUpgrade}");
+
+                return maxUpgrade;
+            }
+            public static int GetRequiredBossForNextUpgrade(int itemTier, int currentUpgrade)
+            {
+                int cumulativeUpgrade = BaseUpgradeLimit.Value;
+                Jotunn.Logger.LogDebug($"GetRequiredBossForNextUpgrade: itemTier={itemTier}, currentUpgrade={currentUpgrade}, base={cumulativeUpgrade}");
+
+                // Start checking from the boss above the item's tier
+                for (int bossTier = itemTier + 1; bossUpgradeValues.ContainsKey(bossTier); bossTier++)
+                {
+                    int bossValue = bossUpgradeValues[bossTier];
+                    cumulativeUpgrade += bossValue;
+                    string bossName = bossNames.ContainsKey(bossTier) ? bossNames[bossTier] : "<unknown>";
+                    Jotunn.Logger.LogDebug($"Checking bossTier={bossTier}, bossValue={bossValue}, cumulativeUpgrade={cumulativeUpgrade} (bossName={bossName})");
+
+                    if (currentUpgrade < cumulativeUpgrade)
+                    {
+                        Jotunn.Logger.LogDebug($"Next required bossTier={bossTier} ({bossName}) to unlock upgrades beyond {currentUpgrade}.");
+                        return bossTier;
+                    }
+                }
+
+                Jotunn.Logger.LogDebug($"No boss tier found that unlocks upgrades beyond currentUpgrade={currentUpgrade}. cumulativeUpgrade={cumulativeUpgrade}");
+                return -1;
+            }
+            public static int GetEquivalentTier(int baseItemTier, int qualityLevel, int? highestBossTier = null)
+            {
+                // Use the supplied highest boss tier when provided.
+                // Otherwise use the highest configured boss tier.
+                int configuredMaxBossTier =
+                    (bossUpgradeValues != null && bossUpgradeValues.Count > 0)
+                        ? bossUpgradeValues.Keys.Max()
+                        : 0;
+
+                int maxBossTier = highestBossTier ?? configuredMaxBossTier;
+
+                // Equipment cannot exist beyond the highest boss tier.
+                if (baseItemTier > maxBossTier)
+                    baseItemTier = maxBossTier;
+
+                // Determine how far this item is from the maximum quality
+                // available at its current equipment tier.
+                int currentMaxUpgrade = GetMaxUpgradeLevel(baseItemTier, maxBossTier);
+                int distanceFromMax = currentMaxUpgrade - qualityLevel;
+
+                Jotunn.Logger.LogDebug(
+                    $"GetEquivalentTier: baseTier={baseItemTier}, " +
+                    $"quality={qualityLevel}, " +
+                    $"currentMax={currentMaxUpgrade}, " +
+                    $"distanceFromMax={distanceFromMax}, " +
+                    $"maxBossTier={maxBossTier}");
+
+                // Look for the highest equipment tier that can represent
+                // the same distance from its own maximum quality.
+                for (int candidateTier = maxBossTier; candidateTier >= 0; candidateTier--)
+                {
+                    int candidateMaxUpgrade =
+                        GetMaxUpgradeLevel(candidateTier, maxBossTier);
+
+                    int candidateQuality =
+                        candidateMaxUpgrade - distanceFromMax;
+
+                    // Quality is 1-based and cannot exceed the tier's maximum.
+                    if (candidateQuality >= 1 &&
+                        candidateQuality <= candidateMaxUpgrade)
+                    {
+                        Jotunn.Logger.LogDebug(
+                            $"GetEquivalentTier: baseTier={baseItemTier}, " +
+                            $"quality={qualityLevel} => " +
+                            $"candidateTier={candidateTier}, " +
+                            $"candidateQuality={candidateQuality}");
+
+                        return candidateTier;
+                    }
+                }
+
+                // Should only be reached in an unexpected edge case.
+                Jotunn.Logger.LogDebug(
+                    $"GetEquivalentTier: no equivalent tier found for " +
+                    $"baseTier={baseItemTier}, quality={qualityLevel}; " +
+                    $"returning baseTier.");
+
+                return baseItemTier;
+            }
+        }
+
+        #endregion
     }
 }
