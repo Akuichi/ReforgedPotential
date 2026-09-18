@@ -228,9 +228,9 @@ namespace ReforgedPotential
             CostStart = Config.Bind("Upgrade Settings", "03. Cost Start", 1, new ConfigDescription("Base idol cost for upgrades. (Game Default is 1)", intRange, isAdminOnly));
             CostIncreasePerInterval = Config.Bind("Upgrade Settings", "04. Cost Increase Per Interval", 1,
                 new ConfigDescription("Additional ingredient cost each time the cost scaling interval is reached starting at CostScalingLevelStart. (Starting at level X, the upgrade cost increases by this amount every Y levels. For example, with an increase of 1 every 2 levels starting at level 6: levels 1–5 cost 1, levels 6–7 cost 2, levels 8–9 cost 3, and so on.)", null, isAdminOnly));
-            CostIncreaseInterval = Config.Bind("Upgrade Settings", "05. Cost Increase Interval", 2,
+            CostIncreaseInterval = Config.Bind("Upgrade Settings", "05. Cost Increase Interval", 1,
                 new ConfigDescription("Number of levels between each cost increase. Set to 0 to disable cost scaling.", intRange, isAdminOnly));
-            CostScalingLevelStart = Config.Bind("Upgrade Settings", "06. Cost Scaling Level Start", 6,
+            CostScalingLevelStart = Config.Bind("Upgrade Settings", "06. Cost Scaling Level Start", 2,
                 new ConfigDescription("Level at which cost scaling starts.", intRange, isAdminOnly));
             
             UpgradeBaseDuration = Config.Bind("Upgrade Settings", "07. Upgrade Base Duration", 2f,
