@@ -75,6 +75,8 @@ namespace ReforgedPotential
             { 8, "Kall Fimbulbringer" }
         };
 
+        internal static ConfigEntry<bool> EnableIdolProgression;
+
         internal static ConfigEntry<bool> EnableRecipes;
 
         internal static ConfigEntry<string> Recipe_Upgrader0Armor;
@@ -272,6 +274,11 @@ namespace ReforgedPotential
                 { 7, Boss7MaxUpgradeLevel.Value },
                 { 8, Boss8MaxUpgradeLevel.Value }
             };
+            #endregion
+            //--------------
+            #region Idol Progression
+            EnableIdolProgression = Config.Bind("Idol Progression", "01. Enable Idol Progression", true,
+                new ConfigDescription("If true, the required idol to upgrade an equipment will change to match it's current equivalent item tier and level (If boss progression is off, tiers will change every 4 levels)", null, isAdminOnly));
             #endregion
             //--------------
             Station_Global = Config.Bind("Crafting Station", "01. Global Station", "piece_artisanstation",
@@ -911,17 +918,15 @@ namespace ReforgedPotential
                 try
                 {
                     if (EnableBossProgression.Value == false) return true;
-                    // get the private m_selectedRecipe field (struct RecipeDataPair)
-                    var selField = typeof(InventoryGui).GetField("m_selectedRecipe", BindingFlags.Instance | BindingFlags.NonPublic);
-                    var selPair = selField?.GetValue(__instance);
-                    if (selPair == null) return true; // no selection -> run original
-
-                    var pairType = selPair.GetType();
+                    var selectedField = typeof(InventoryGui).GetField("m_selectedRecipe", BindingFlags.Instance | BindingFlags.NonPublic);
+                    var selectedRecipeDataPair = selectedField.GetValue(__instance);
+                    if (selectedRecipeDataPair == null) return true;
+                    var pairType = selectedRecipeDataPair.GetType();
                     var recipeProp = pairType.GetProperty("Recipe", BindingFlags.Instance | BindingFlags.Public);
                     var itemProp = pairType.GetProperty("ItemData", BindingFlags.Instance | BindingFlags.Public);
 
-                    var recipe = recipeProp?.GetValue(selPair) as Recipe;
-                    var item = itemProp?.GetValue(selPair) as ItemDrop.ItemData;
+                    var recipe = recipeProp?.GetValue(selectedRecipeDataPair) as Recipe;
+                    var item = itemProp?.GetValue(selectedRecipeDataPair) as ItemDrop.ItemData;
 
                     if (recipe == null) return true;
 
@@ -934,8 +939,6 @@ namespace ReforgedPotential
                         foreach (var req in recipe.m_resources ?? Array.Empty<Piece.Requirement>())
                         {
                             if (req == null || req.m_resItem == null) continue;
-
-                            // preferred stable identifier: prefab name
                             string prefabId = req.m_resItem.name;
                             if (!prefabId.Contains("Upgrader"))
                             {
@@ -960,9 +963,6 @@ namespace ReforgedPotential
                             int maxUpgradeLevel = UpgradeHelper.GetMaxUpgradeLevel(itemTier, highestBossTier);
                             var itemQuality = item.m_quality;
 
-                            // Quality is starts from level 1 unlike the item tiers
-                            // If current quality is already at the maximum,
-                            // the attempted next upgrade is not allowed.
                             if (itemQuality >= maxUpgradeLevel)
                             {
                                 int requiredBoss = UpgradeHelper.GetRequiredBossForNextUpgrade(itemTier,itemQuality);
@@ -1005,14 +1005,13 @@ namespace ReforgedPotential
                 catch (Exception ex)
                 {
                     Jotunn.Logger.LogWarning($"OnCraftPressed prefix exception: {ex}");
-                    // fall through and run original on error
                 }
-
-                // return true -> run original OnCraftPressed
                 return true;
             }
             static Dictionary<string, string> originalRequirements = new Dictionary<string, string>();
             static int currentEquivalentTier;
+
+            #region SetRecipe
             [HarmonyPostfix]
             [HarmonyPatch(nameof(InventoryGui.SetRecipe))]
             static void SetRecipePostfix()
@@ -1045,27 +1044,83 @@ namespace ReforgedPotential
                         {
                             if (selectedRecipe.m_resources[i].m_upgraderResource)
                             {
-                                if(originalRequirements.TryGetValue(selectedRecipe.m_item.name, out var resource))
+                                if (originalRequirements.TryGetValue(selectedRecipe.m_item.name, out var resource))
                                 {
                                     Jotunn.Logger.LogDebug($"SetRecipePostfix: Found upgrader resource for {selectedItemData.m_shared.m_name}: {resource}");
                                     int configuredMaxBoss = (bossUpgradeValues != null && bossUpgradeValues.Count > 0) ? bossUpgradeValues.Keys.Max() : 8;
                                     var selectedResource = selectedRecipe.m_resources[i];
                                     int qualityLevel = selectedItemData.m_quality;
                                     int baseTier = UpgradeHelper.GetEquipmentTier(resource);
-                                    // find equivalent tier & equivalent quality
-                                    int equivTier = UpgradeHelper.GetEquivalentTier(baseTier, qualityLevel, configuredMaxBoss);
-                                    currentEquivalentTier = equivTier;
-                                    int baseMax = UpgradeHelper.GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
-                                    int candidateMax = UpgradeHelper.GetMaxUpgradeLevel(equivTier, configuredMaxBoss);
-                                    int distanceFromMax = baseMax - qualityLevel;
-                                    int candidateQuality = candidateMax - distanceFromMax;
-                                    Jotunn.Logger.LogDebug($"SetRecipePostfix: Base tier {baseTier}, quality {qualityLevel}, equivalent tier {equivTier}.");
 
-                                    // clamp candidateQuality to valid range
-                                    candidateQuality = Math.Max(1, Math.Min(candidateMax, candidateQuality));
+                                    int equivTier;
+                                    int candidateQuality;
+                                    int candidateMax;
 
-                                    // compute cost using per-tier level (candidateQuality)
-                                    int level = candidateQuality - 1;
+                                    // BOTH OFF: no idol swap, use base tier & current quality for cost
+                                    if (!EnableBossProgression.Value && !EnableIdolProgression.Value)
+                                    {
+                                        
+                                        equivTier = baseTier;
+                                        candidateMax = UpgradeHelper.GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
+                                        candidateQuality = Math.Max(1, Math.Min(candidateMax, qualityLevel));
+
+                                        currentEquivalentTier = equivTier;
+                                        Jotunn.Logger.LogDebug($"SetRecipePostfix (BossOff/IdolOff): keeping base resource={resource}, baseTier={baseTier}, quality={qualityLevel}, candidateQuality={candidateQuality}");
+                                    }
+                                    // Boss progression disabled, idol progression enabled:
+                                    // Map every 4 levels, but start from the equipment's base tier
+                                    else if (!EnableBossProgression.Value && EnableIdolProgression.Value)
+                                    {
+                                        
+                                        int tierBlock = Math.Max(0, (qualityLevel - 1) / 4);
+                                        // Desired tier is baseTier + tierBlock
+                                        int desiredTier = baseTier + tierBlock;
+
+                                        // Clamp desiredTier to available configured max boss tier
+                                        int maxAvailableTier = (bossUpgradeValues != null && bossUpgradeValues.Count > 0) ? bossUpgradeValues.Keys.Max() : 8;
+                                        desiredTier = Math.Min(desiredTier, maxAvailableTier);
+
+                                        // Determine how many blocks actually were applied (in case of clamping)
+                                        int actualBlocksUsed = Math.Max(0, desiredTier - baseTier);
+
+                                        equivTier = desiredTier;
+                                        // Within-tier quality (1..4) after subtracting applied blocks
+                                        candidateMax = 4;
+                                        candidateQuality = qualityLevel - (actualBlocksUsed * 4);
+                                        candidateQuality = Math.Max(1, Math.Min(candidateMax, candidateQuality));
+
+                                        currentEquivalentTier = equivTier;
+                                        Jotunn.Logger.LogDebug($"SetRecipePostfix (BossOff/IdolOn): baseTier={baseTier}, quality={qualityLevel}, tierBlock={tierBlock}, desiredTier={desiredTier}, actualBlocksUsed={actualBlocksUsed}, mappedTier={equivTier}, candidateQuality={candidateQuality}");
+                                    }
+                                    // Boss progression enabled, idol progression disabled:
+                                    // Keep original resource prefab (no idol swap), compute cost from base tier & quality
+                                    else if (EnableBossProgression.Value && !EnableIdolProgression.Value)
+                                    {
+                                        
+                                        equivTier = baseTier;
+                                        int maxForBase = UpgradeHelper.GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
+                                        candidateMax = Math.Max(1, maxForBase);
+                                        candidateQuality = Math.Max(1, Math.Min(candidateMax, qualityLevel));
+
+                                        currentEquivalentTier = equivTier;
+                                        Jotunn.Logger.LogDebug($"SetRecipePostfix (BossOn/IdolOff): keeping base resource={resource}, baseTier={baseTier}, quality={qualityLevel}, candidateQuality={candidateQuality}");
+                                    }
+                                    else
+                                    {
+                                        // Default behaviorboth on: compute equivalent tier as before
+                                        equivTier = UpgradeHelper.GetEquivalentTier(baseTier, qualityLevel, configuredMaxBoss);
+                                        currentEquivalentTier = equivTier;
+                                        int baseMax = UpgradeHelper.GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
+                                        candidateMax = UpgradeHelper.GetMaxUpgradeLevel(equivTier, configuredMaxBoss);
+                                        int distanceFromMax = baseMax - qualityLevel;
+                                        candidateQuality = candidateMax - distanceFromMax;
+                                        candidateQuality = Math.Max(1, Math.Min(candidateMax, candidateQuality));
+
+                                        Jotunn.Logger.LogDebug($"SetRecipePostfix (Default): Base tier {baseTier}, quality {qualityLevel}, equivalent tier {equivTier}, candidateQuality {candidateQuality}.");
+                                    }
+
+                                    // compute cost using per tier level (candidateQuality)
+                                    int level = Math.Max(0, candidateQuality - 1);
                                     int costStartLevel = Math.Max(1, CostScalingLevelStart.Value);
                                     int cost = CostStart.Value;
                                     if (CostIncreaseInterval.Value > 0 && level >= costStartLevel)
@@ -1075,32 +1130,50 @@ namespace ReforgedPotential
                                             * CostIncreasePerInterval.Value;
                                     }
 
-                                    if (selectedResource.m_resItem.name.Contains("Weapon"))
+                                    // Apply resource prefab & amount:
+                                    // For branches where we keep the original resource prefab, set it directly.
+                                    if ((!EnableIdolProgression.Value) /* idol disabled -> keep original prefab */)
                                     {
-                                        Jotunn.Logger.LogDebug($"SetRecipePostfix: Selected resource is a weapon. Setting cost to {cost}.");
-                                        var prefab = ObjectDB.instance.GetItemPrefab($"Upgrader{equivTier}Weapon");
-                                        if (prefab.TryGetComponent(out ItemDrop itemDrop))
+                                        var prefab = ObjectDB.instance.GetItemPrefab(resource);
+                                        if (prefab != null && prefab.TryGetComponent(out ItemDrop itemDrop))
                                         {
-                                            Jotunn.Logger.LogDebug($"SetRecipePostfix: Found prefab for Upgrader{equivTier}Weapon. Setting resource to {itemDrop.name} with amount {cost}.");
+                                            Jotunn.Logger.LogDebug($"SetRecipePostfix: Keeping original resource {itemDrop.name} and setting amount to {cost}.");
                                             selectedResource.m_resItem = itemDrop;
                                             selectedResource.m_amount = cost;
                                         }
-
-                                    }
-                                    else if (selectedResource.m_resItem.name.Contains("Armor"))
-                                    {
-                                        Jotunn.Logger.LogDebug($"SetRecipePostfix: Selected resource is armor. Setting cost to {cost}.");
-                                        var prefab = ObjectDB.instance.GetItemPrefab($"Upgrader{equivTier}Armor");
-                                        if (prefab.TryGetComponent(out ItemDrop itemDrop))
+                                        else
                                         {
-                                            Jotunn.Logger.LogDebug($"SetRecipePostfix: Found prefab for Upgrader{equivTier}Armor. Setting resource to {itemDrop.name} with amount {cost}.");
-                                            selectedResource.m_resItem = itemDrop;
-                                            selectedResource.m_amount = cost;
+                                            Jotunn.Logger.LogDebug($"SetRecipePostfix: Could not find prefab for original resource '{resource}'.");
                                         }
                                     }
                                     else
                                     {
-                                        Jotunn.Logger.LogDebug($"SetRecipePostfix: Selected resource is neither weapon nor armor. Setting cost to {cost}.");
+                                        if (selectedResource.m_resItem.name.Contains("Weapon"))
+                                        {
+                                            Jotunn.Logger.LogDebug($"SetRecipePostfix: Selected resource is a weapon. Setting cost to {cost} and tier to {equivTier}.");
+                                            var prefab = ObjectDB.instance.GetItemPrefab($"Upgrader{equivTier}Weapon");
+                                            if (prefab != null && prefab.TryGetComponent(out ItemDrop itemDrop))
+                                            {
+                                                Jotunn.Logger.LogDebug($"SetRecipePostfix: Found prefab for Upgrader{equivTier}Weapon. Setting resource to {itemDrop.name} with amount {cost}.");
+                                                selectedResource.m_resItem = itemDrop;
+                                                selectedResource.m_amount = cost;
+                                            }
+                                        }
+                                        else if (selectedResource.m_resItem.name.Contains("Armor"))
+                                        {
+                                            Jotunn.Logger.LogDebug($"SetRecipePostfix: Selected resource is armor. Setting cost to {cost} and tier to {equivTier}.");
+                                            var prefab = ObjectDB.instance.GetItemPrefab($"Upgrader{equivTier}Armor");
+                                            if (prefab != null && prefab.TryGetComponent(out ItemDrop itemDrop))
+                                            {
+                                                Jotunn.Logger.LogDebug($"SetRecipePostfix: Found prefab for Upgrader{equivTier}Armor. Setting resource to {itemDrop.name} with amount {cost}.");
+                                                selectedResource.m_resItem = itemDrop;
+                                                selectedResource.m_amount = cost;
+                                            }
+                                        }
+                                        else
+                                        {
+                                            Jotunn.Logger.LogDebug($"SetRecipePostfix: Selected resource is neither weapon nor armor. Setting cost to {cost}.");
+                                        }
                                     }
                                 }
                             }
@@ -1111,11 +1184,10 @@ namespace ReforgedPotential
                 catch (Exception ex)
                 {
                     Jotunn.Logger.LogWarning($"SetRecipePostfix postfix exception: {ex}");
-                    // fall through and run original on error
                 }
                 return;
             }
-
+            #endregion
             static object GetSelectedRecipePair()
             {
                 var invGuiType = typeof(InventoryGui);
