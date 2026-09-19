@@ -106,7 +106,6 @@ namespace ReforgedPotential
         internal static ConfigEntry<float> UpgradeBaseDuration;
         internal static ConfigEntry<float> UpgradeDurationIncreasePerLevel;
         public static CustomRPC RPC_Reforged;
-
         public static ConfigEntry<bool> EnableGlobalUpgradeNotifications;
         public static ConfigEntry<string> SuccessMessage;
         public static ConfigEntry<string> FailedMessage;
@@ -349,6 +348,10 @@ namespace ReforgedPotential
                 __state = null;
                 try
                 {
+                    var mi = player.GetType().GetMethod("GetCurrentCraftingStation", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var station = mi?.Invoke(player, null);
+                    bool atUpgrader = station != null && (bool)station.GetType().GetField("m_upgrader", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(station);
+                    if (!atUpgrader) return true;
                     // preserve previous behavior of altering shared upgrade/break chances for upgrader resources
                     var igType = __instance.GetType();
                     var recipeField = igType.GetField("m_craftRecipe", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
@@ -496,6 +499,11 @@ namespace ReforgedPotential
 
                     if (__state?.Snapshot == null) return;
 
+                    var mi = player.GetType().GetMethod("GetCurrentCraftingStation", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    var station = mi?.Invoke(player, null);
+                    bool atUpgrader = station != null && (bool)station.GetType().GetField("m_upgrader", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(station);
+                    if (!atUpgrader) return;
+
                     // capture post-craft inventory
                     InventorySnapshot afterSnap = null;
                     try { afterSnap = CaptureInventory(player); } catch { afterSnap = new InventorySnapshot(); }
@@ -542,15 +550,24 @@ namespace ReforgedPotential
                     int foundQuality = int.MinValue;
                     try
                     {
-                        // same instance present after craft?
-                        if (afterSnap.ByInstance.TryGetValue(__state.Snapshot.UpgradeItem, out var q))
+                        // 1) Prefer the same instance (most reliable)
+                        if (afterSnap.ByInstance.TryGetValue(__state.Snapshot.UpgradeItem, out var qSame))
                         {
-                            foundQuality = q;
+                            foundQuality = qSame;
                         }
                         else
                         {
-                            // search for any new instance of same prefab and read its quality
-                            foreach (var it in afterSnap.ByInstance.Keys)
+                            int origQ = __state.Snapshot?.OriginalQuality ?? int.MinValue;
+                            string prefabName = __state.Snapshot?.PrefabName ?? string.Empty;
+
+                            // Prepare sets for new vs pre-existing instances
+                            var beforeKeys = (__state.InventoryBefore?.ByInstance?.Keys ?? Enumerable.Empty<object>()).ToHashSet();
+                            var afterKeys = afterSnap.ByInstance.Keys.ToList();
+
+                            // 2) Examine NEW instances only (after \ before)
+                            var newInstances = afterKeys.Where(k => !beforeKeys.Contains(k)).ToList();
+                            var matchingNew = new List<(object Instance, int Quality)>();
+                            foreach (var it in newInstances)
                             {
                                 try
                                 {
@@ -562,13 +579,69 @@ namespace ReforgedPotential
                                         name = dropPrefab?.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public)?.GetValue(dropPrefab) as string;
                                     }
                                     if (string.IsNullOrEmpty(name)) continue;
-                                    if (!string.Equals(name, __state.Snapshot.PrefabName, StringComparison.OrdinalIgnoreCase)) continue;
+                                    if (!string.Equals(name, prefabName, StringComparison.OrdinalIgnoreCase)) continue;
 
-                                    var qf = it.GetType().GetField("m_quality", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                    if (qf != null) foundQuality = Convert.ToInt32(qf.GetValue(it));
-                                    if (foundQuality != int.MinValue) break;
+                                    int q = int.MinValue;
+                                    try { q = Convert.ToInt32(it.GetType().GetField("m_quality", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it)); } catch { }
+                                    matchingNew.Add((it, q));
                                 }
-                                catch { }
+                                catch { /* ignore problematic instance */ }
+                            }
+
+                            if (matchingNew.Count > 0)
+                            {
+                                // Pick best candidate among new instances:
+                                // 1) exact expected quality (origQ + 1)
+                                // 2) any > origQ
+                                // 3) any == origQ
+                                // 4) any < origQ (fallback choose highest)
+                                var pick = matchingNew.FirstOrDefault(x => x.Quality == origQ + 1);
+                                if (pick.Instance != null) foundQuality = pick.Quality;
+                                else
+                                {
+                                    pick = matchingNew.FirstOrDefault(x => x.Quality > origQ);
+                                    if (pick.Instance != null) foundQuality = pick.Quality;
+                                    else
+                                    {
+                                        pick = matchingNew.FirstOrDefault(x => x.Quality == origQ);
+                                        if (pick.Instance != null) foundQuality = pick.Quality;
+                                        else
+                                        {
+                                            pick = matchingNew.OrderByDescending(x => x.Quality).FirstOrDefault();
+                                            if (pick.Instance != null) foundQuality = pick.Quality;
+                                        }
+                                    }
+                                }
+                            }
+                            else
+                            {
+                                // 3) No new matches — inspect common instances that persisted and might have been updated
+                                var common = afterKeys.Where(k => beforeKeys.Contains(k)).ToList();
+                                foreach (var it in common)
+                                {
+                                    try
+                                    {
+                                        var shared = it.GetType().GetField("m_shared", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
+                                        var name = shared?.GetType().GetField("m_name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(shared) as string;
+                                        if (string.IsNullOrEmpty(name))
+                                        {
+                                            var dropPrefab = it.GetType().GetField("m_dropPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
+                                            name = dropPrefab?.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public)?.GetValue(dropPrefab) as string;
+                                        }
+                                        if (string.IsNullOrEmpty(name)) continue;
+                                        if (!string.Equals(name, prefabName, StringComparison.OrdinalIgnoreCase)) continue;
+
+                                        int beforeQ = __state.InventoryBefore.ByInstance.TryGetValue(it, out var bq) ? bq : int.MinValue;
+                                        int afterQ = afterSnap.ByInstance.TryGetValue(it, out var aq) ? aq : int.MinValue;
+
+                                        if (afterQ == beforeQ) continue;
+                                        if (afterQ == origQ + 1) { foundQuality = afterQ; break; }
+                                        if (afterQ > origQ) { foundQuality = afterQ; break; }
+                                        if (afterQ < origQ) { foundQuality = afterQ; break; }
+                                        if (afterQ == origQ) { foundQuality = afterQ; break; }
+                                    }
+                                    catch { /* best-effort */ }
+                                }
                             }
                         }
                     }
@@ -722,8 +795,12 @@ namespace ReforgedPotential
                     }
                 }
 
-                // 2) find new instances that weren't present before and match prefab
-                var newInstances = after.ByInstance.Keys.Except(before.ByInstance.Keys).ToList();
+                // Precompute sets
+                var beforeKeys = new HashSet<object>(before.ByInstance.Keys);
+                var afterKeys = new HashSet<object>(after.ByInstance.Keys);
+
+                // 2) Prefer NEW instances only (after \ before) that match prefab
+                var newInstances = afterKeys.Except(beforeKeys).ToList();
                 var matchingNew = newInstances.Where(it =>
                 {
                     try
@@ -740,16 +817,62 @@ namespace ReforgedPotential
                     catch { return false; }
                 }).ToList();
 
-                foreach (var it in matchingNew)
+                if (matchingNew.Count > 0)
                 {
-                    int q = int.MinValue;
-                    try { q = Convert.ToInt32(it.GetType().GetField("m_quality", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it)); } catch { }
-                    if (q == origQ + 1) return UpgradeOutcome.Upgraded;
-                    if (q < origQ) return UpgradeOutcome.Degraded;
-                    if (q == origQ) return UpgradeOutcome.Unchanged;
+                    // Prefer exact expected quality, then any > orig, then == orig, else best fallback
+                    var candidates = new List<int>();
+                    foreach (var it in matchingNew)
+                    {
+                        try
+                        {
+                            var qf = it.GetType().GetField("m_quality", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                            int q = qf != null ? Convert.ToInt32(qf.GetValue(it)) : int.MinValue;
+                            candidates.Add(q);
+                        }
+                        catch { candidates.Add(int.MinValue); }
+                    }
+
+                    if (candidates.Any(c => c == origQ + 1)) return UpgradeOutcome.Upgraded;
+                    if (candidates.Any(c => c > origQ)) return UpgradeOutcome.Upgraded;
+                    if (candidates.Any(c => c == origQ)) return UpgradeOutcome.Unchanged;
+                    if (candidates.Any(c => c < origQ)) return UpgradeOutcome.Degraded;
+
+                    return UpgradeOutcome.Unknown;
                 }
 
-                // 3) check returned ingredient creation -> "broke"
+                // 3) No new matching instances — check common instances (present both before & after) for quality changes
+                try
+                {
+                    var common = afterKeys.Intersect(beforeKeys).Where(k => !ReferenceEquals(k, snap.UpgradeItem));
+                    foreach (var it in common)
+                    {
+                        try
+                        {
+                            var shared = it.GetType().GetField("m_shared", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
+                            var name = shared?.GetType().GetField("m_name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(shared) as string;
+                            if (string.IsNullOrEmpty(name))
+                            {
+                                var dropPrefab = it.GetType().GetField("m_dropPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
+                                name = dropPrefab?.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public)?.GetValue(dropPrefab) as string;
+                            }
+                            if (string.IsNullOrEmpty(name)) continue;
+                            if (!string.Equals(name, prefab, StringComparison.OrdinalIgnoreCase)) continue;
+
+                            int beforeQ = before.ByInstance.TryGetValue(it, out var bq) ? bq : int.MinValue;
+                            int afterQ = after.ByInstance.TryGetValue(it, out var aq) ? aq : int.MinValue;
+
+                            if (afterQ == beforeQ) continue;
+                            if (afterQ == origQ + 1) return UpgradeOutcome.Upgraded;
+                            if (afterQ > origQ) return UpgradeOutcome.Upgraded;
+                            if (afterQ < origQ) return UpgradeOutcome.Degraded;
+                            if (afterQ == origQ) return UpgradeOutcome.Unchanged;
+                        }
+                        catch { /* per-instance best-effort */ }
+                    }
+                }
+                catch { /* ignore */ }
+
+                // 4) check returned ingredient creation -> "broke"
                 if (recipeIngredientNames != null)
                 {
                     foreach (var ing in recipeIngredientNames)
@@ -760,13 +883,12 @@ namespace ReforgedPotential
                     }
                 }
 
-                // 4) if the original is missing and no candidate found -> destroyed/consumed
+                // 5) original missing and no new candidates -> destroyed/consumed
                 bool originalPresentAfter = after.ByInstance.Keys.Any(it => ReferenceEquals(it, snap.UpgradeItem));
                 if (!originalPresentAfter && matchingNew.Count == 0) return UpgradeOutcome.Destroyed;
 
                 return UpgradeOutcome.Unknown;
             }
-
             // Craft speed
             [HarmonyPrefix]
             [HarmonyPatch(nameof(InventoryGui.SetupCrafting))]
@@ -1009,53 +1131,6 @@ namespace ReforgedPotential
             }
 
         }
-
-        //    [HarmonyPostfix]
-        //    [HarmonyPatch(nameof(Piece.Requirement.GetAmount))]
-        //    static void GetAmountPostfix(Piece.Requirement __instance, int qualityLevel, ref int __result)
-        //    {
-        //        if (__instance == null) return;
-
-        //        if (!__instance.m_upgraderResource) return;
-        //        int level = qualityLevel - 1;
-        //        int costStartLevel = Math.Max(1, CostScalingLevelStart.Value);
-        //        int cost = CostStart.Value;
-
-        //        if (CostIncreaseInterval.Value > 0 && level >= costStartLevel)
-        //        {
-        //            cost += ((level - costStartLevel)
-        //                / CostIncreaseInterval.Value + 1)
-        //                * CostIncreasePerInterval.Value;
-        //        }
-
-        //        __result = cost;
-        //    }
-
-        //    static object GetSelectedRecipePair()
-        //    {
-        //        var invGuiType = typeof(InventoryGui);
-        //        var instanceProp = invGuiType.GetProperty("instance", BindingFlags.Static | BindingFlags.Public);
-        //        var invGui = instanceProp?.GetValue(null);
-        //        if (invGui == null) return null;
-
-        //        var selField = invGuiType.GetField("m_selectedRecipe", BindingFlags.Instance | BindingFlags.NonPublic);
-        //        return selField?.GetValue(invGui);
-        //    }
-
-        //    static (Recipe recipe, ItemDrop.ItemData itemData) GetSelectedRecipe()
-        //    {
-        //        var selPair = GetSelectedRecipePair();
-        //        if (selPair == null) return (null, null);
-
-        //        var pairType = selPair.GetType();
-        //        var recipeProp = pairType.GetProperty("Recipe", BindingFlags.Instance | BindingFlags.Public);
-        //        var itemProp = pairType.GetProperty("ItemData", BindingFlags.Instance | BindingFlags.Public);
-
-        //        var recipe = recipeProp?.GetValue(selPair) as Recipe;
-        //        var item = itemProp?.GetValue(selPair) as ItemDrop.ItemData;
-        //        return (recipe, item);
-        //    }
-        //}
 
         [HarmonyPatch(typeof(ObjectDB))]
         static class ObjectDBPatch
