@@ -1,6 +1,7 @@
 ﻿using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
+using Jotunn.Configs;
 using Jotunn.Entities;
 using Jotunn.Managers;
 using Jotunn.Utils;
@@ -229,8 +230,8 @@ namespace ReforgedPotential
                 new ConfigDescription("Additional ingredient cost each time the cost scaling interval is reached starting at CostScalingLevelStart. (Starting at level X, the upgrade cost increases by this amount every Y levels. For example, with an increase of 1 every 2 levels starting at level 6: levels 1–5 cost 1, levels 6–7 cost 2, levels 8–9 cost 3, and so on.)", null, isAdminOnly));
             CostIncreaseInterval = Config.Bind("Upgrade Settings", "05. Cost Increase Interval", 1,
                 new ConfigDescription("Number of levels between each cost increase. Set to 0 to disable cost scaling.", intRange, isAdminOnly));
-            CostScalingLevelStart = Config.Bind("Upgrade Settings", "06. Cost Scaling Level Start", 2,
-                new ConfigDescription("Level at which cost scaling starts.", intRange, isAdminOnly));
+            CostScalingLevelStart = Config.Bind("Upgrade Settings", "06. Cost Scaling Level Start", 1,
+                new ConfigDescription("Level after at which cost scaling starts.", intRange, isAdminOnly));
             
             UpgradeBaseDuration = Config.Bind("Upgrade Settings", "07. Upgrade Base Duration", 2f,
                 new ConfigDescription("Base crafting duration for upgrading. (Game Default is 8)", null, isAdminOnly));
@@ -273,17 +274,17 @@ namespace ReforgedPotential
             };
             #endregion
             //--------------
-            Station_Global = Config.Bind("Crafting Station", "01. Global Station", "$piece_artisanstation",
-                new ConfigDescription("Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. '$piece_workbench') or prefab name. Empty = craftable by hand.", null, isAdminOnly));
+            Station_Global = Config.Bind("Crafting Station", "01. Global Station", "piece_artisanstation",
+                new ConfigDescription("Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. 'piece_workbench'). Empty = craftable by hand.", null, isAdminOnly));
             //--------------
             #region Recipes
             EnableRecipes = Config.Bind("Recipes", "01. Enable Recipes", true,
                 new ConfigDescription("Enable or disable all idol crafting recipes.", null, isAdminOnly));
             Recipe_Upgrader0Armor = Config.Bind("Recipes", "02. Wooden Protection Idol",
-                "FineWood:20,Tin:10,GreydwarfEye:10",
+                "Wood:50,GreydwarfEye:10",
                 new ConfigDescription("Ingredients for Wooden Protection Idol: comma-separated entries 'PrefabName:Amount'.", null, isAdminOnly));
             Recipe_Upgrader0Weapon = Config.Bind("Recipes", "03. Wooden Battle Idol",
-                "FineWood:20,Tin:10,GreydwarfEye:10",
+                "Wood:50,GreydwarfEye:10",
                 new ConfigDescription("Ingredients for Wooden Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
             Recipe_Upgrader1Armor = Config.Bind("Recipes", "04. Bronze Protection Idol",
@@ -329,18 +330,22 @@ namespace ReforgedPotential
                 new ConfigDescription("Ingredients for Flametal Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
 
             Recipe_Upgrader7Armor = Config.Bind("Recipes", "16. Bloodgold Protection Idol",
-                "Gold:10,Coins:40",
+                "Gold:10,Coins:40,AncientCoin:10",
                 new ConfigDescription("Ingredients for Bloodgold Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
             Recipe_Upgrader7Weapon = Config.Bind("Recipes", "17. Bloodgold Battle Idol",
-                "Gold:10,Coins:40",
+                "Gold:10,Coins:40,AncientCoin:10",
                 new ConfigDescription("Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
             #endregion
+
+
+            AddConfigurableRecipes();
 
         }
 
         [HarmonyPatch(typeof(InventoryGui))]
         static class InventoryGuiPatch
         {
+            #region DoCrafting Prefix/Postfix
             [HarmonyPrefix]
             [HarmonyPatch(nameof(InventoryGui.DoCrafting))]
             static bool DoCraftingPrefix(object __instance, object player, out DoCraftingState __state)
@@ -889,6 +894,7 @@ namespace ReforgedPotential
 
                 return UpgradeOutcome.Unknown;
             }
+            #endregion
             // Craft speed
             [HarmonyPrefix]
             [HarmonyPatch(nameof(InventoryGui.SetupCrafting))]
@@ -1013,6 +1019,11 @@ namespace ReforgedPotential
             {
                 try
                 {
+                    if (Player.m_localPlayer.GetCurrentCraftingStation() is not { m_upgrader: true })
+                    {
+                        Jotunn.Logger.LogDebug($"SetRecipePostfix: Player is not at an upgrader station.");
+                        return;
+                    }
                     var selectedRecipePair = GetSelectedRecipe();
                     var selectedRecipe = selectedRecipePair.recipe;
                     var selectedItemData = selectedRecipePair.itemData;
@@ -1131,279 +1142,100 @@ namespace ReforgedPotential
             }
 
         }
-
-        [HarmonyPatch(typeof(ObjectDB))]
-        static class ObjectDBPatch
+        private void AddConfigurableRecipes()
         {
-            [HarmonyPostfix]
-            [HarmonyPatch(nameof(ObjectDB.Awake))]
-            static void AwakePostfix(ObjectDB __instance)
+            try
             {
-                try
+                if (EnableRecipes == null || !EnableRecipes.Value)
                 {
-                    if (__instance == null)
+                    Jotunn.Logger.LogInfo("Configurable recipes are disabled; skipping AddConfigurableRecipes.");
+                    return;
+                }
+
+                var targets = new (string Prefab, ConfigEntry<string> Config)[]
+                {
+                        ("Upgrader0Armor", Recipe_Upgrader0Armor),
+                        ("Upgrader0Weapon", Recipe_Upgrader0Weapon),
+                        ("Upgrader1Armor", Recipe_Upgrader1Armor),
+                        ("Upgrader1Weapon", Recipe_Upgrader1Weapon),
+                        ("Upgrader2Armor", Recipe_Upgrader2Armor),
+                        ("Upgrader2Weapon", Recipe_Upgrader2Weapon),
+                        ("Upgrader3Armor", Recipe_Upgrader3Armor),
+                        ("Upgrader3Weapon", Recipe_Upgrader3Weapon),
+                        ("Upgrader4Armor", Recipe_Upgrader4Armor),
+                        ("Upgrader4Weapon", Recipe_Upgrader4Weapon),
+                        ("Upgrader5Armor", Recipe_Upgrader5Armor),
+                        ("Upgrader5Weapon", Recipe_Upgrader5Weapon),
+                        ("Upgrader6Armor", Recipe_Upgrader6Armor),
+                        ("Upgrader6Weapon", Recipe_Upgrader6Weapon),
+                        ("Upgrader7Armor", Recipe_Upgrader7Armor),
+                        ("Upgrader7Weapon", Recipe_Upgrader7Weapon)
+                };
+
+                int added = 0;
+                foreach (var (prefabName, cfgEntry) in targets)
+                {
+                    string cfgValue = cfgEntry?.Value?.Trim();
+                    if (string.IsNullOrEmpty(cfgValue))
                     {
-                        Jotunn.Logger.LogWarning("ObjectDB instance is null.");
-                        return;
+                        Jotunn.Logger.LogInfo($"AddConfigurableRecipes: '{prefabName}' configuration is empty, skipping.");
+                        continue;
                     }
 
-                    if (!EnableRecipes.Value)
+                    var craftingStationId = string.IsNullOrEmpty(Station_Global.Value.Trim().Trim('$')) ? null : Station_Global.Value.Trim().Trim('$');
+                    // Build RecipeConfig; Jotunn will resolve prefabs/requirements
+                    var recipeConfig = new RecipeConfig
                     {
-                        Jotunn.Logger.LogInfo("Idol crafting recipes are disabled. Skipping recipe additions");
-                        return;
-                    }
-
-                    // Map target prefab name -> config entry (ingredients)
-                    var targets = new[]
-                    {
-                        new { Name = "Upgrader0Armor", RecipeCfg = Recipe_Upgrader0Armor },
-                        new { Name = "Upgrader0Weapon", RecipeCfg = Recipe_Upgrader0Weapon },
-                        new { Name = "Upgrader1Armor", RecipeCfg = Recipe_Upgrader1Armor },
-                        new { Name = "Upgrader1Weapon", RecipeCfg = Recipe_Upgrader1Weapon },
-                        new { Name = "Upgrader2Armor", RecipeCfg = Recipe_Upgrader2Armor },
-                        new { Name = "Upgrader2Weapon", RecipeCfg = Recipe_Upgrader2Weapon },
-                        new { Name = "Upgrader3Armor", RecipeCfg = Recipe_Upgrader3Armor },
-                        new { Name = "Upgrader3Weapon", RecipeCfg = Recipe_Upgrader3Weapon },
-                        new { Name = "Upgrader4Armor", RecipeCfg = Recipe_Upgrader4Armor },
-                        new { Name = "Upgrader4Weapon", RecipeCfg = Recipe_Upgrader4Weapon },
-                        new { Name = "Upgrader5Armor", RecipeCfg = Recipe_Upgrader5Armor },
-                        new { Name = "Upgrader5Weapon", RecipeCfg = Recipe_Upgrader5Weapon },
-                        new { Name = "Upgrader6Armor", RecipeCfg = Recipe_Upgrader6Armor },
-                        new { Name = "Upgrader6Weapon", RecipeCfg = Recipe_Upgrader6Weapon },
-                        new { Name = "Upgrader7Armor", RecipeCfg = Recipe_Upgrader7Armor },
-                        new { Name = "Upgrader7Weapon", RecipeCfg = Recipe_Upgrader7Weapon }
+                        Item = prefabName,
+                        CraftingStation = craftingStationId,
+                        Enabled = true,
+                        MinStationLevel = 1
                     };
-                    // Resolve global station once
-                    CraftingStation globalStation = ResolveCraftingStation(__instance, Station_Global?.Value?.Trim());
-                    if (globalStation != null)
+
+                    bool anyRequirement = false;
+                    var tokens = cfgValue.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var raw in tokens)
                     {
-                        Jotunn.Logger.LogInfo($"Resolved global crafting station: '{globalStation.m_name ?? globalStation.gameObject.name}'");
-                    }
-                    else if (!string.IsNullOrEmpty(Station_Global?.Value))
-                    {
-                        Jotunn.Logger.LogWarning($"Global station '{Station_Global.Value}' was not found; recipes will be craftable by hand.");
-                    }
+                        var token = raw.Trim();
+                        if (string.IsNullOrEmpty(token)) continue;
 
-                    int added = 0;
-                    foreach (var t in targets)
-                    {
-                        string prefabName = t.Name;
-                        var cfg = t.RecipeCfg;
-                        if (cfg == null)
+                        var parts = token.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length != 2)
                         {
-                            Jotunn.Logger.LogWarning($"No config for {prefabName}; skipping.");
+                            Jotunn.Logger.LogWarning($"AddConfigurableRecipes: invalid token '{token}' for '{prefabName}'. Use 'PrefabName:Amount'.");
                             continue;
                         }
 
-                        string cfgValue = cfg.Value?.Trim();
-                        if (string.IsNullOrEmpty(cfgValue))
+                        string reqName = parts[0].Trim();
+                        if (!int.TryParse(parts[1].Trim(), out int reqAmount) || reqAmount <= 0)
                         {
-                            Jotunn.Logger.LogInfo($"Empty ingredient list for {prefabName}; skipping.");
+                            Jotunn.Logger.LogWarning($"AddConfigurableRecipes: invalid amount in token '{token}' for '{prefabName}'. Must be positive integer.");
                             continue;
                         }
 
-                        // get target prefab by name via ObjectDB helper
-                        GameObject targetGO = __instance.GetItemPrefab(prefabName);
-                        if (targetGO == null)
-                        {
-                            Jotunn.Logger.LogWarning($"Target prefab '{prefabName}' not found in ObjectDB; skipping.");
-                            continue;
-                        }
-
-                        ItemDrop targetItem = targetGO.GetComponent<ItemDrop>();
-                        if (targetItem == null)
-                        {
-                            Jotunn.Logger.LogWarning($"Target prefab '{prefabName}' has no ItemDrop; skipping.");
-                            continue;
-                        }
-
-                        // skip if recipe already exists
-                        bool exists = __instance.m_recipes.Exists(r => r != null && r.m_item != null &&
-                                                                     (r.m_item == targetItem || string.Equals(r.m_item.name, prefabName, StringComparison.Ordinal)));
-                        if (exists)
-                        {
-                            Jotunn.Logger.LogInfo($"Recipe for '{prefabName}' already exists; skipping.");
-                            continue;
-                        }
-
-                        // parse config into requirements
-                        var requirements = ParseRequirements(cfgValue, __instance).ToArray();
-                        if (requirements == null || requirements.Length == 0)
-                        {
-                            Jotunn.Logger.LogWarning($"No valid ingredients parsed for '{prefabName}' from '{cfgValue}'; skipping.");
-                            continue;
-                        }
-
-                        // create recipe using ScriptableObject pattern (matching other mods)
-                        Recipe recipe = ScriptableObject.CreateInstance<Recipe>();
-                        recipe.name = prefabName + "_ConfigRecipe";
-                        recipe.m_amount = 1;
-                        recipe.m_item = targetItem;
-                        recipe.m_enabled = true;
-                        recipe.m_craftingStation = globalStation; // apply the single global station to all
-                        recipe.m_minStationLevel = 0;
-                        recipe.m_repairStation = null;
-                        recipe.m_resources = requirements;
-
-                        __instance.m_recipes.Add(recipe);
-                        added++;
-                        Jotunn.Logger.LogInfo($"Added recipe for '{prefabName}' requiring {string.Join(", ", requirements.Select(req => $"{GetReqName(req)} x{req.m_amount}"))}.");
+                        recipeConfig.AddRequirement(reqName, reqAmount);
+                        anyRequirement = true;
                     }
 
-                    if (added > 0)
+                    if (!anyRequirement)
                     {
-                        Jotunn.Logger.LogInfo($"Finished adding {added} recipe(s). Total recipes now: {__instance.m_recipes.Count}");
-                        // try to refresh crafting UI if open
-                        try
-                        {
-                            var invGuiType = typeof(InventoryGui);
-                            var instanceProp = invGuiType.GetProperty("instance", BindingFlags.Static | BindingFlags.Public);
-                            var invGui = instanceProp?.GetValue(null);
-                            if (invGui != null)
-                            {
-                                var updateMethod = invGuiType.GetMethod("UpdateCraftingPanel", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                updateMethod?.Invoke(invGui, null);
-                                Jotunn.Logger.LogInfo($"Requested InventoryGui.UpdateCraftingPanel()");
-                            }
-                        }
-                        catch { /* non-critical */ }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Jotunn.Logger.LogError($"Exception: {ex}");
-                }
-            }
-
-            // parse "PrefabA:10,PrefabB:2" --> List<Piece.Requirement>
-            private static List<Piece.Requirement> ParseRequirements(string cfgValue, ObjectDB odb)
-            {
-                var list = new List<Piece.Requirement>();
-                if (string.IsNullOrEmpty(cfgValue)) return list;
-
-                // split by comma, each token "Name:Amount"
-                var tokens = cfgValue.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
-                foreach (var raw in tokens)
-                {
-                    var token = raw.Trim();
-                    if (string.IsNullOrEmpty(token)) continue;
-                    var parts = token.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
-                    if (parts.Length != 2)
-                    {
-                        Jotunn.Logger.LogWarning($"Invalid ingredient token '{token}'. Use 'PrefabName:Amount'.");
+                        Jotunn.Logger.LogWarning($"AddConfigurableRecipes: no valid ingredients for '{prefabName}' from '{cfgValue}'; skipping.");
                         continue;
                     }
 
-                    string name = parts[0].Trim();
-                    if (!int.TryParse(parts[1].Trim(), out int amount) || amount <= 0)
-                    {
-                        Jotunn.Logger.LogWarning($"Invalid amount in token '{token}'. Must be positive integer.");
-                        continue;
-                    }
-
-                    // find prefab (prefer ObjectDB lookup)
-                    GameObject prefab = odb.GetItemPrefab(name) ?? GetPrefabFromZNet(name);
-                    if (prefab == null)
-                    {
-                        Jotunn.Logger.LogWarning($"Ingredient prefab '{name}' not found in ObjectDB or ZNetScene.");
-                        continue;
-                    }
-
-                    // attempt to use ItemDrop on requirement (most mods expect ItemDrop)
-                    ItemDrop drop = prefab.GetComponent<ItemDrop>();
-                    if (drop == null)
-                    {
-                        Jotunn.Logger.LogWarning($"Ingredient prefab '{name}' missing ItemDrop component; skipping.");
-                        continue;
-                    }
-
-                    var req = new Piece.Requirement
-                    {
-                        m_amount = amount,
-                        m_resItem = drop,
-                        m_amountPerLevel = 0,
-                        m_upgraderResource = false,
-                        m_recover = false
-                    };
-                    list.Add(req);
+                    // Register recipe via Jotunn's ItemManager using a CustomRecipe
+                    ItemManager.Instance.AddRecipe(new CustomRecipe(recipeConfig));
+                    added++;
+                    Jotunn.Logger.LogInfo($"AddConfigurableRecipes: added recipe for '{prefabName}' (requirements: {cfgValue}).");
                 }
 
-                return list;
+                Jotunn.Logger.LogInfo($"AddConfigurableRecipes: finished. Added {added} configurable recipe(s).");
             }
-
-            private static GameObject GetPrefabFromZNet(string name)
+            catch (Exception ex)
             {
-                try
-                {
-                    var znetType = typeof(ZNetScene);
-                    var instanceProp = znetType.GetProperty("instance", BindingFlags.Static | BindingFlags.Public);
-                    var znet = instanceProp?.GetValue(null);
-                    var prefabsField = znetType.GetField("m_prefabs", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    var prefabs = prefabsField?.GetValue(znet) as List<GameObject>;
-                    if (prefabs != null)
-                    {
-                        return prefabs.Find(g => string.Equals(g?.name, name, StringComparison.Ordinal));
-                    }
-                }
-                catch { }
-                return null;
-            }
-
-            // Resolve station by searching recipes' m_craftingStation name or ItemDB prefabs with CraftingStation component.
-            private static CraftingStation ResolveCraftingStation(ObjectDB odb, string stationName)
-            {
-                if (string.IsNullOrEmpty(stationName)) return null;
-
-                try
-                {
-                    // search existing recipes for a matching station
-                    foreach (var rec in odb.m_recipes)
-                    {
-                        if (rec?.m_craftingStation == null) continue;
-                        var cs = rec.m_craftingStation;
-                        if (string.Equals(cs.m_name, stationName, StringComparison.Ordinal) ||
-                            string.Equals(cs.gameObject.name, stationName, StringComparison.Ordinal))
-                        {
-                            return cs;
-                        }
-                    }
-
-                    // search ObjectDB.m_items for a prefab with CraftingStation component
-                    var itemsField = typeof(ObjectDB).GetField("m_items", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    var items = itemsField?.GetValue(odb) as List<GameObject>;
-                    if (items != null)
-                    {
-                        foreach (var go in items)
-                        {
-                            if (go == null) continue;
-                            var csComp = go.GetComponent<CraftingStation>();
-                            if (csComp == null) continue;
-                            if (string.Equals(csComp.m_name, stationName, StringComparison.Ordinal) ||
-                                string.Equals(go.name, stationName, StringComparison.Ordinal))
-                            {
-                                return csComp;
-                            }
-                        }
-                    }
-                }
-                catch (Exception ex)
-                {
-                    Jotunn.Logger.LogWarning($"[ReforgedOfPotential] ConfigRecipes: ResolveCraftingStation exception: {ex}");
-                }
-
-                return null;
-            }
-
-            private static string GetReqName(Piece.Requirement req)
-            {
-                if (req == null) return "<null>";
-                try
-                {
-                    if (req.m_resItem is ItemDrop id) return id.gameObject.name;
-                }
-                catch { }
-                return "<unknown>";
+                Jotunn.Logger.LogError($"AddConfigurableRecipes exception: {ex}");
             }
         }
+
     }
 }
