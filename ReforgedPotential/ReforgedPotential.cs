@@ -1,10 +1,12 @@
 ﻿using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
+using JetBrains.Annotations;
 using Jotunn.Configs;
 using Jotunn.Entities;
 using Jotunn.Managers;
 using Jotunn.Utils;
+using PlayFab.ExperimentationModels;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -355,56 +357,46 @@ namespace ReforgedPotential
             #region DoCrafting Prefix/Postfix
             [HarmonyPrefix]
             [HarmonyPatch(nameof(InventoryGui.DoCrafting))]
-            static bool DoCraftingPrefix(object __instance, object player, out DoCraftingState __state)
+            static bool DoCraftingPrefix(InventoryGui __instance, Player player, out DoCraftingState __state)
             {
                 __state = null;
                 try
                 {
-                    var mi = player.GetType().GetMethod("GetCurrentCraftingStation", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    var station = mi?.Invoke(player, null);
-                    bool atUpgrader = station != null && (bool)station.GetType().GetField("m_upgrader", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(station);
+                    var station = player.GetCurrentCraftingStation();
+                    bool atUpgrader = station.m_upgrader;
+                    Jotunn.Logger.LogDebug($"DoCraftingPrefix: Player is at upgrader station: {atUpgrader}");
                     if (!atUpgrader) return true;
                     // preserve previous behavior of altering shared upgrade/break chances for upgrader resources
-                    var igType = __instance.GetType();
-                    var recipeField = igType.GetField("m_craftRecipe", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    var recipeObj = recipeField?.GetValue(__instance);
+                    var recipe = __instance.m_craftRecipe;
                     var modified = new List<KeyValuePair<object, float>>();
 
-                    if (recipeObj != null)
+                    if (recipe != null) 
                     {
-                        var resourcesField = recipeObj.GetType().GetField("m_resources", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        var resources = resourcesField?.GetValue(recipeObj) as Array;
+                    
+                        var resources = recipe.m_resources as Array;
                         if (resources != null)
                         {
-                            foreach (var req in resources)
+                            foreach (Piece.Requirement req in resources)
                             {
-                                if (req == null) continue;
-                                var reqType = req.GetType();
-                                var upgraderResField = reqType.GetField("m_upgraderResource", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                if (upgraderResField == null) continue;
-                                bool isUpgraderResource = false;
-                                try { isUpgraderResource = (bool)upgraderResField.GetValue(req); } catch { isUpgraderResource = false; }
+                                bool isUpgraderResource = req.m_upgraderResource;
                                 if (!isUpgraderResource) continue;
 
-                                var resItemObj = reqType.GetField("m_resItem", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(req);
+                                var resItemObj = req.m_resItem;
                                 if (resItemObj == null) continue;
-                                var itemDataObj = resItemObj.GetType().GetField("m_itemData", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(resItemObj);
+                                var itemDataObj = resItemObj.m_itemData;
                                 if (itemDataObj == null) continue;
-                                var sharedObj = itemDataObj.GetType().GetField("m_shared", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(itemDataObj);
+                                var sharedObj = itemDataObj.m_shared;
                                 if (sharedObj == null) continue;
-
-                                var sharedType = sharedObj.GetType();
-                                var upgradeChanceField = sharedType.GetField("m_upgradeChance", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                var breakChanceField = sharedType.GetField("m_breakChance", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                if (upgradeChanceField == null || breakChanceField == null) continue;
+                                var upgradeChanceField = sharedObj.m_upgradeChance;
+                                var breakChanceField = sharedObj.m_breakChance;
 
                                 try
                                 {
-                                    float original = Convert.ToSingle(upgradeChanceField.GetValue(sharedObj));
+                                    float original = upgradeChanceField;
                                     modified.Add(new KeyValuePair<object, float>(sharedObj, original));
-                                    upgradeChanceField.SetValue(sharedObj, UpgradeChance.Value);
-                                    breakChanceField.SetValue(sharedObj, BreakChance.Value);
-                                    Jotunn.Logger.LogDebug($"DoCraftingPrefix: Modified shared upgradeChance/breakChance for resource '{sharedObj.GetType().Name}' (original={original}, new={UpgradeChance.Value}/{BreakChance.Value})");
+                                    upgradeChanceField = UpgradeChance.Value;
+                                    breakChanceField = BreakChance.Value;
+                                    Jotunn.Logger.LogDebug($"DoCraftingPrefix: Modified shared upgradeChance/breakChance for resource '{sharedObj.m_name}' (original={original}, new={UpgradeChance.Value}/{BreakChance.Value})");
                                 }
                                 catch { /* ignore individual failures and continue */ }
                             }
@@ -412,71 +404,34 @@ namespace ReforgedPotential
                     }
 
                     // Snapshot the m_craftUpgradeItem and recipe ingredient names for later analysis
-                    object upgradeItem = null;
                     int originalQuality = int.MinValue;
                     string prefabName = null;
+                    int variant = __instance.m_craftVariant;
+                    var gridPos = new Vector2i();
                     var returnedIngredientNames = new List<string>();
-
+                    ItemDrop.ItemData itemData = null;
                     try
                     {
-                        var upgradeField = igType.GetField("m_craftUpgradeItem", BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.Public);
-                        upgradeItem = upgradeField?.GetValue(__instance);
-                        if (upgradeItem != null)
+                        itemData = __instance.m_craftUpgradeItem;
+
+                        if (itemData != null)
                         {
-                            var qField = upgradeItem.GetType().GetField("m_quality", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            if (qField != null) originalQuality = Convert.ToInt32(qField.GetValue(upgradeItem));
-
-                            var shared = upgradeItem.GetType().GetField("m_shared", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(upgradeItem);
-                            prefabName = shared?.GetType().GetField("m_name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(shared) as string;
-
-                            if (string.IsNullOrEmpty(prefabName))
-                            {
-                                var dropPrefab = upgradeItem.GetType().GetField("m_dropPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(upgradeItem);
-                                prefabName = dropPrefab?.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public)?.GetValue(dropPrefab) as string;
-                            }
-                        }
-
-                        // collect recipe ingredient names that may be returned on break (m_recover)
-                        if (recipeObj != null)
-                        {
-                            var resourcesField = recipeObj.GetType().GetField("m_resources", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            var resources = resourcesField?.GetValue(recipeObj) as Array;
-                            if (resources != null)
-                            {
-                                foreach (var req in resources)
-                                {
-                                    if (req == null) continue;
-                                    var reqType = req.GetType();
-                                    var recoverField = reqType.GetField("m_recover", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                                    if (recoverField == null) continue;
-                                    bool recover = false;
-                                    try { recover = (bool)recoverField.GetValue(req); } catch { recover = false; }
-                                    if (!recover) continue;
-
-                                    var resItemObj = reqType.GetField("m_resItem", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(req);
-                                    if (resItemObj != null)
-                                    {
-                                        var name = resItemObj?.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(resItemObj) as string;
-                                        if (!string.IsNullOrEmpty(name)) returnedIngredientNames.Add(name);
-                                    }
-                                }
-                            }
+                            originalQuality = itemData.m_quality;
+                            gridPos = itemData.m_gridPos;
+                            prefabName = itemData.m_dropPrefab.name;
+                            Jotunn.Logger.LogDebug($"DoCraftingPrefix: Captured upgrade item snapshot: prefab={prefabName}, quality={originalQuality}, gridPos={gridPos}, variant={variant}");
                         }
                     }
                     catch {}
 
-                    InventorySnapshot beforeSnap = null;
-                    try { beforeSnap = CaptureInventory(player); } catch { beforeSnap = new InventorySnapshot(); }
-
-                    if ((modified.Count > 0) || upgradeItem != null)
+                    if ((modified.Count > 0) || itemData != null)
                     {
                         __state = new DoCraftingState
                         {
                             ModifiedList = modified.Count > 0 ? modified : null,
-                            Snapshot = upgradeItem != null ? new UpgradeSnapshot { UpgradeItem = upgradeItem, OriginalQuality = originalQuality, PrefabName = prefabName } : null,
-                            InventoryBefore = beforeSnap,
-                            ReturnIngredientNames = returnedIngredientNames
+                            Snapshot = new UpgradeSnapshot { OriginalQuality = originalQuality, PrefabName = prefabName, GridPos = gridPos }
                         };
+                        Jotunn.Logger.LogDebug($"DoCraftingPrefix: Created DoCraftingState with {modified.Count} modified shared objects and snapshot of upgrade item.");
                     }
                 }
                 catch (Exception ex)
@@ -488,202 +443,74 @@ namespace ReforgedPotential
 
             [HarmonyPostfix]
             [HarmonyPatch(nameof(InventoryGui.DoCrafting))]
-            static void DoCraftingPostfix(object __instance, object player, DoCraftingState __state)
+            static void DoCraftingPostfix(object __instance, DoCraftingState __state)
             {
                 try
                 {
                     // restore modified shared upgradeChance values
-                    if (__state?.ModifiedList is List<KeyValuePair<object, float>> modified)
-                    {
-                        foreach (var kvp in modified)
-                        {
-                            var sharedObj = kvp.Key;
-                            float original = kvp.Value;
-                            if (sharedObj == null) continue;
-                            var sharedType = sharedObj.GetType();
-                            var upgradeChanceField = sharedType.GetField("m_upgradeChance", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            if (upgradeChanceField != null)
-                            {
-                                try { upgradeChanceField.SetValue(sharedObj, original); } catch { }
-                            }
-                        }
-                    }
+                    //if (__state?.ModifiedList is List<KeyValuePair<object, float>> modified)
+                    //{
+                    //    foreach (var kvp in modified)
+                    //    {
+                    //        var sharedObj = kvp.Key;
+                    //        float original = kvp.Value;
+                    //        if (sharedObj == null) continue;
+                    //        var sharedType = sharedObj.GetType();
+                    //        var upgradeChanceField = sharedType.GetField("m_upgradeChance", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+                    //        if (upgradeChanceField != null)
+                    //        {
+                    //            try { upgradeChanceField.SetValue(sharedObj, original); } catch { }
+                    //        }
+                    //    }
+                    //}
 
                     if (__state?.Snapshot == null) return;
 
-                    var mi = player.GetType().GetMethod("GetCurrentCraftingStation", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    var station = mi?.Invoke(player, null);
-                    bool atUpgrader = station != null && (bool)station.GetType().GetField("m_upgrader", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(station);
+                    var localPlayer = Player.m_localPlayer;
+                    var station = localPlayer.GetCurrentCraftingStation();
+                    bool atUpgrader = station != null && station.m_upgrader;
                     if (!atUpgrader) return;
-
-                    // capture post-craft inventory
-                    InventorySnapshot afterSnap = null;
-                    try { afterSnap = CaptureInventory(player); } catch { afterSnap = new InventorySnapshot(); }
-
-                    var outcome = AnalyzeUpgradeResult(__state.Snapshot, __state.InventoryBefore ?? new InventorySnapshot(), afterSnap, __state.ReturnIngredientNames ?? Enumerable.Empty<string>());
-                    
-                    string playerName = "<unknown>";
-                    try
+                    var gridPosX = __state.Snapshot.GridPos.x;
+                    var gridPosY = __state.Snapshot.GridPos.y;
+                    var newItem = localPlayer.GetInventory().GetItemAt(gridPosX, gridPosY);
+                    var outcome = UpgradeOutcome.Unknown;
+                    if (newItem != null)
                     {
-                        if (player != null)
+                        if (newItem.m_dropPrefab.name != __state.Snapshot.PrefabName)
                         {
-                            var gp = player.GetType().GetMethod("GetPlayerName", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            if (gp != null) playerName = gp.Invoke(player, null) as string ?? playerName;
-                        }
-                    }
-                    catch { }
-
-                    // determine displayable item name (prefer localized shared name)
-                    string itemName = __state.Snapshot?.PrefabName ?? "<unknown item>";
-                    try
-                    {
-                        var upItem = __state.Snapshot?.UpgradeItem;
-                        if (upItem != null)
-                        {
-                            var shared = upItem.GetType().GetField("m_shared", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(upItem);
-                            var sharedNameKey = shared?.GetType().GetField("m_name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(shared) as string;
-                            if (!string.IsNullOrEmpty(sharedNameKey))
-                            {
-                                try
-                                {
-                                    itemName = Localization.instance.Localize(sharedNameKey);
-                                }
-                                catch
-                                {
-                                    itemName = sharedNameKey;
-                                }
-                            }
-                        }
-                    }
-                    catch { /* best effort */ }
-
-                    // determine resulting level if possible
-                    int reportedLevel = __state.Snapshot?.OriginalQuality ?? 0;
-                    int foundQuality = int.MinValue;
-                    try
-                    {
-                        // 1) Prefer the same instance (most reliable)
-                        if (afterSnap.ByInstance.TryGetValue(__state.Snapshot.UpgradeItem, out var qSame))
-                        {
-                            foundQuality = qSame;
+                            Jotunn.Logger.LogDebug($"DoCraftingPostfix: Upgrade result prefab name mismatch (original={__state.Snapshot.PrefabName}, new={newItem.m_dropPrefab.name})");
                         }
                         else
                         {
-                            int origQ = __state.Snapshot?.OriginalQuality ?? int.MinValue;
-                            string prefabName = __state.Snapshot?.PrefabName ?? string.Empty;
-
-                            // Prepare sets for new vs pre-existing instances
-                            var beforeKeys = (__state.InventoryBefore?.ByInstance?.Keys ?? Enumerable.Empty<object>()).ToHashSet();
-                            var afterKeys = afterSnap.ByInstance.Keys.ToList();
-
-                            // 2) Examine NEW instances only (after \ before)
-                            var newInstances = afterKeys.Where(k => !beforeKeys.Contains(k)).ToList();
-                            var matchingNew = new List<(object Instance, int Quality)>();
-                            foreach (var it in newInstances)
+                            Jotunn.Logger.LogDebug($"DoCraftingPostfix: Upgrade result item found at grid position ({gridPosX},{gridPosY}) with quality {newItem.m_quality} (original={__state.Snapshot.OriginalQuality})");
+                            if (newItem.m_quality > __state.Snapshot.OriginalQuality)
                             {
-                                try
-                                {
-                                    var shared = it.GetType().GetField("m_shared", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
-                                    var name = shared?.GetType().GetField("m_name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(shared) as string;
-                                    if (string.IsNullOrEmpty(name))
-                                    {
-                                        var dropPrefab = it.GetType().GetField("m_dropPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
-                                        name = dropPrefab?.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public)?.GetValue(dropPrefab) as string;
-                                    }
-                                    if (string.IsNullOrEmpty(name)) continue;
-                                    if (!string.Equals(name, prefabName, StringComparison.OrdinalIgnoreCase)) continue;
-
-                                    int q = int.MinValue;
-                                    try { q = Convert.ToInt32(it.GetType().GetField("m_quality", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it)); } catch { }
-                                    matchingNew.Add((it, q));
-                                }
-                                catch { /* ignore problematic instance */ }
+                                outcome = UpgradeOutcome.Upgraded;
                             }
-
-                            if (matchingNew.Count > 0)
+                            else if (newItem.m_quality < __state.Snapshot.OriginalQuality)
                             {
-                                // Pick best candidate among new instances:
-                                // 1) exact expected quality (origQ + 1)
-                                // 2) any > origQ
-                                // 3) any == origQ
-                                // 4) any < origQ (fallback choose highest)
-                                var pick = matchingNew.FirstOrDefault(x => x.Quality == origQ + 1);
-                                if (pick.Instance != null) foundQuality = pick.Quality;
-                                else
-                                {
-                                    pick = matchingNew.FirstOrDefault(x => x.Quality > origQ);
-                                    if (pick.Instance != null) foundQuality = pick.Quality;
-                                    else
-                                    {
-                                        pick = matchingNew.FirstOrDefault(x => x.Quality == origQ);
-                                        if (pick.Instance != null) foundQuality = pick.Quality;
-                                        else
-                                        {
-                                            pick = matchingNew.OrderByDescending(x => x.Quality).FirstOrDefault();
-                                            if (pick.Instance != null) foundQuality = pick.Quality;
-                                        }
-                                    }
-                                }
+                                outcome = UpgradeOutcome.Degraded;
                             }
                             else
                             {
-                                // 3) No new matches — inspect common instances that persisted and might have been updated
-                                var common = afterKeys.Where(k => beforeKeys.Contains(k)).ToList();
-                                foreach (var it in common)
-                                {
-                                    try
-                                    {
-                                        var shared = it.GetType().GetField("m_shared", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
-                                        var name = shared?.GetType().GetField("m_name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(shared) as string;
-                                        if (string.IsNullOrEmpty(name))
-                                        {
-                                            var dropPrefab = it.GetType().GetField("m_dropPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
-                                            name = dropPrefab?.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public)?.GetValue(dropPrefab) as string;
-                                        }
-                                        if (string.IsNullOrEmpty(name)) continue;
-                                        if (!string.Equals(name, prefabName, StringComparison.OrdinalIgnoreCase)) continue;
-
-                                        int beforeQ = __state.InventoryBefore.ByInstance.TryGetValue(it, out var bq) ? bq : int.MinValue;
-                                        int afterQ = afterSnap.ByInstance.TryGetValue(it, out var aq) ? aq : int.MinValue;
-
-                                        if (afterQ == beforeQ) continue;
-                                        if (afterQ == origQ + 1) { foundQuality = afterQ; break; }
-                                        if (afterQ > origQ) { foundQuality = afterQ; break; }
-                                        if (afterQ < origQ) { foundQuality = afterQ; break; }
-                                        if (afterQ == origQ) { foundQuality = afterQ; break; }
-                                    }
-                                    catch { /* best-effort */ }
-                                }
+                                outcome = UpgradeOutcome.ReturnedIngredients;
                             }
                         }
                     }
-                    catch { }
-
-                    if (foundQuality != int.MinValue) reportedLevel = foundQuality;
                     else
                     {
-                        // fallback heuristics based on outcome
-                        switch (outcome)
-                        {
-                            case UpgradeOutcome.Upgraded: reportedLevel = (__state.Snapshot?.OriginalQuality ?? 0) + 1; break;
-                            case UpgradeOutcome.Degraded: reportedLevel = Math.Max(0, (__state.Snapshot?.OriginalQuality ?? 0) - 1); break;
-                            case UpgradeOutcome.ReturnedIngredients: reportedLevel = __state.Snapshot?.OriginalQuality ?? 0; break;
-                            case UpgradeOutcome.Destroyed: reportedLevel = Math.Max(0, (__state.Snapshot?.OriginalQuality ?? 0) - 1); break;
-                            default: reportedLevel = __state.Snapshot?.OriginalQuality ?? 0; break;
-                        }
+                        Jotunn.Logger.LogDebug($"DoCraftingPostfix: No item found at grid position ({gridPosX},{gridPosY}) after crafting.");
                     }
+                    string playerName = localPlayer.GetPlayerName();
+                    string itemName = __state.Snapshot.PrefabName ?? "<unknown item>";
+                    itemName = Localization.instance.Localize(itemName);
 
-                    // success = true when upgraded, false otherwise
+                    int reportedLevel = newItem.m_quality;
                     bool success = outcome == UpgradeOutcome.Upgraded;
-                    if (!success)
-                    {
-                        reportedLevel = (__state.Snapshot?.OriginalQuality ?? 0) + 1;
-                    }
                     BroadcastUpgradeResult(playerName, itemName, reportedLevel, success);
                 }
                 catch (Exception ex)
                 {
-                    Jotunn.Logger.LogWarning($"DoCrafting postfix analysis exception: {ex}");
                 }
             }
 
@@ -693,214 +520,16 @@ namespace ReforgedPotential
             {
                 public List<KeyValuePair<object, float>> ModifiedList;
                 public UpgradeSnapshot Snapshot;
-                public InventorySnapshot InventoryBefore;
-                public List<string> ReturnIngredientNames;
             }
 
             private class UpgradeSnapshot
             {
-                public object UpgradeItem;       // original ItemData reference observed in prefix
                 public int OriginalQuality;
                 public string PrefabName;
-            }
-
-            private class InventorySnapshot
-            {
-                public Dictionary<object, int> ByInstance = new Dictionary<object, int>();
-                public Dictionary<string, int> CountByPrefab = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                public Vector2i GridPos;
             }
 
             private enum UpgradeOutcome { Upgraded, Degraded, Destroyed, ReturnedIngredients, Unchanged, Unknown }
-
-            private static InventorySnapshot CaptureInventory(object playerObj)
-            {
-                var snap = new InventorySnapshot();
-                if (playerObj == null) return snap;
-                try
-                {
-                    Jotunn.Logger.LogDebug($"Capturing inventory for player object of type {playerObj.GetType().FullName}");
-                    var mi = playerObj.GetType().GetMethod("GetInventory", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    var inventory = mi?.Invoke(playerObj, null) ?? playerObj.GetType().GetField("m_inventory", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(playerObj);
-                    if (inventory == null) return snap;
-
-                    System.Collections.IEnumerable itemsEnum = null;
-                    var itemsField = inventory.GetType().GetField("m_inventory", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                    if (itemsField != null) itemsEnum = itemsField.GetValue(inventory) as System.Collections.IEnumerable;
-                    if (itemsEnum == null)
-                    {
-                        var itemsProp = inventory.GetType().GetProperty("m_inventory", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                        if (itemsProp != null) itemsEnum = itemsProp.GetValue(inventory) as System.Collections.IEnumerable;
-                    }
-
-                    if (itemsEnum == null)
-                    {
-                        foreach (var f in inventory.GetType().GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic))
-                        {
-                            var val = f.GetValue(inventory) as System.Collections.IEnumerable;
-                            if (val == null) continue;
-                            foreach (var it in val)
-                            {
-                                if (it == null) continue;
-                                if (it.GetType().GetField("m_quality", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic) != null)
-                                {
-                                    itemsEnum = val;
-                                    break;
-                                }
-                            }
-                            if (itemsEnum != null) break;
-                        }
-                    }
-
-                    if (itemsEnum == null) return snap;
-
-                    foreach (var it in itemsEnum)
-                    {
-                        if (it == null) continue;
-                        int quality = int.MinValue;
-                        try
-                        {
-                            var qf = it.GetType().GetField("m_quality", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            if (qf != null) quality = Convert.ToInt32(qf.GetValue(it));
-                        }
-                        catch { }
-
-                        // determine prefab/shared name
-                        string name = null;
-                        try
-                        {
-                            var shared = it.GetType().GetField("m_shared", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
-                            name = shared?.GetType().GetField("m_name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(shared) as string;
-                            if (string.IsNullOrEmpty(name))
-                            {
-                                var dropPrefab = it.GetType().GetField("m_dropPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
-                                name = dropPrefab?.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public)?.GetValue(dropPrefab) as string;
-                            }
-                        }
-                        catch { }
-
-                        try { snap.ByInstance[it] = quality; } catch { }
-                        if (!string.IsNullOrEmpty(name))
-                        {
-                            if (!snap.CountByPrefab.TryGetValue(name, out int c)) c = 0;
-                            snap.CountByPrefab[name] = c + 1;
-                        }
-                    }
-                }
-                catch { }
-                return snap;
-            }
-
-            private static UpgradeOutcome AnalyzeUpgradeResult(UpgradeSnapshot snap, InventorySnapshot before, InventorySnapshot after, IEnumerable<string> recipeIngredientNames)
-            {
-                if (snap == null) return UpgradeOutcome.Unknown;
-                int origQ = snap.OriginalQuality;
-                string prefab = snap.PrefabName ?? string.Empty;
-
-                // 1) same instance still present?
-                if (before.ByInstance.ContainsKey(snap.UpgradeItem))
-                {
-                    if (after.ByInstance.TryGetValue(snap.UpgradeItem, out int newQ))
-                    {
-                        if (newQ > origQ) return UpgradeOutcome.Upgraded;
-                        if (newQ < origQ) return UpgradeOutcome.Degraded;
-                        return UpgradeOutcome.Unchanged;
-                    }
-                }
-
-                // Precompute sets
-                var beforeKeys = new HashSet<object>(before.ByInstance.Keys);
-                var afterKeys = new HashSet<object>(after.ByInstance.Keys);
-
-                // 2) Prefer NEW instances only (after \ before) that match prefab
-                var newInstances = afterKeys.Except(beforeKeys).ToList();
-                var matchingNew = newInstances.Where(it =>
-                {
-                    try
-                    {
-                        var shared = it.GetType().GetField("m_shared", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
-                        var name = shared?.GetType().GetField("m_name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(shared) as string;
-                        if (string.IsNullOrEmpty(name))
-                        {
-                            var dropPrefab = it.GetType().GetField("m_dropPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
-                            name = dropPrefab?.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public)?.GetValue(dropPrefab) as string;
-                        }
-                        return string.Equals(name, prefab, StringComparison.OrdinalIgnoreCase);
-                    }
-                    catch { return false; }
-                }).ToList();
-
-                if (matchingNew.Count > 0)
-                {
-                    // Prefer exact expected quality, then any > orig, then == orig, else best fallback
-                    var candidates = new List<int>();
-                    foreach (var it in matchingNew)
-                    {
-                        try
-                        {
-                            var qf = it.GetType().GetField("m_quality", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                            int q = qf != null ? Convert.ToInt32(qf.GetValue(it)) : int.MinValue;
-                            candidates.Add(q);
-                        }
-                        catch { candidates.Add(int.MinValue); }
-                    }
-
-                    if (candidates.Any(c => c == origQ + 1)) return UpgradeOutcome.Upgraded;
-                    if (candidates.Any(c => c > origQ)) return UpgradeOutcome.Upgraded;
-                    if (candidates.Any(c => c == origQ)) return UpgradeOutcome.Unchanged;
-                    if (candidates.Any(c => c < origQ)) return UpgradeOutcome.Degraded;
-
-                    return UpgradeOutcome.Unknown;
-                }
-
-                // 3) No new matching instances — check common instances (present both before & after) for quality changes
-                try
-                {
-                    var common = afterKeys.Intersect(beforeKeys).Where(k => !ReferenceEquals(k, snap.UpgradeItem));
-                    foreach (var it in common)
-                    {
-                        try
-                        {
-                            var shared = it.GetType().GetField("m_shared", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
-                            var name = shared?.GetType().GetField("m_name", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(shared) as string;
-                            if (string.IsNullOrEmpty(name))
-                            {
-                                var dropPrefab = it.GetType().GetField("m_dropPrefab", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)?.GetValue(it);
-                                name = dropPrefab?.GetType().GetProperty("name", BindingFlags.Instance | BindingFlags.Public)?.GetValue(dropPrefab) as string;
-                            }
-                            if (string.IsNullOrEmpty(name)) continue;
-                            if (!string.Equals(name, prefab, StringComparison.OrdinalIgnoreCase)) continue;
-
-                            int beforeQ = before.ByInstance.TryGetValue(it, out var bq) ? bq : int.MinValue;
-                            int afterQ = after.ByInstance.TryGetValue(it, out var aq) ? aq : int.MinValue;
-
-                            if (afterQ == beforeQ) continue;
-                            if (afterQ == origQ + 1) return UpgradeOutcome.Upgraded;
-                            if (afterQ > origQ) return UpgradeOutcome.Upgraded;
-                            if (afterQ < origQ) return UpgradeOutcome.Degraded;
-                            if (afterQ == origQ) return UpgradeOutcome.Unchanged;
-                        }
-                        catch { /* per-instance best-effort */ }
-                    }
-                }
-                catch { /* ignore */ }
-
-                // 4) check returned ingredient creation -> "broke"
-                if (recipeIngredientNames != null)
-                {
-                    foreach (var ing in recipeIngredientNames)
-                    {
-                        int beforeCount = before.CountByPrefab.TryGetValue(ing, out var b) ? b : 0;
-                        int afterCount = after.CountByPrefab.TryGetValue(ing, out var a) ? a : 0;
-                        if (afterCount > beforeCount) return UpgradeOutcome.ReturnedIngredients;
-                    }
-                }
-
-                // 5) original missing and no new candidates -> destroyed/consumed
-                bool originalPresentAfter = after.ByInstance.Keys.Any(it => ReferenceEquals(it, snap.UpgradeItem));
-                if (!originalPresentAfter && matchingNew.Count == 0) return UpgradeOutcome.Destroyed;
-
-                return UpgradeOutcome.Unknown;
-            }
             #endregion
             // Craft speed
             [HarmonyPrefix]

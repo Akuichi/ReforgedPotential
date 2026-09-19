@@ -64,10 +64,7 @@ namespace ReforgedPotential
                         $"highestBossTier={highestBossTier}, adding +1.");
                 }
 
-                Jotunn.Logger.LogDebug(
-                    $"GetMaxUpgradeLevel: itemTier={itemTier}, " +
-                    $"highestBossTier={highestBossTier}, " +
-                    $"maxUpgrade={maxUpgrade}");
+                //Jotunn.Logger.LogDebug($"GetMaxUpgradeLevel: itemTier={itemTier}, " + $"highestBossTier={highestBossTier}, " + $"maxUpgrade={maxUpgrade}");
 
                 return maxUpgrade;
             }
