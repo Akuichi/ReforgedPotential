@@ -1,0 +1,10 @@
+﻿{
+  "name": "ReforgedPotential",
+  "description": "Forge of Potential is now configurable, featuring many options like adjustable upgrade and break chances, craftable idols, boss progression, idol progression, and more.",
+  "version_number": "2.0.0",
+  "website_url": "https://discord.gg/wq3C7t5W9b",
+  "dependencies": [
+    "denikson-BepInExPack_Valheim-5.4.2333",
+    "ValheimModding-Jotunn-2.26.1"
+  ]
+}
