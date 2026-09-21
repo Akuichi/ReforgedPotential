@@ -33,7 +33,7 @@ namespace ReforgedPotential
     {
         public const string PluginGUID = "akuichi.ReforgedPotential";
         public const string PluginName = "Reforged Potential";
-        public const string PluginVersion = "2.0.0";
+        public const string PluginVersion = "2.0.1";
 
         
         private readonly Harmony harmony = new Harmony(PluginGUID);
@@ -370,7 +370,7 @@ namespace ReforgedPotential
                 {
                     var station = player.GetCurrentCraftingStation();
                     bool atUpgrader = station.m_upgrader;
-                    Jotunn.Logger.LogDebug($"DoCraftingPrefix: Player is at upgrader station: {atUpgrader}");
+                    Jotunn.Logger.LogDebug($"DoCraftingPrefix: Player is at upgrader station: {atUpgrader}, station name: {station.name}" );
                     if (!atUpgrader) return true;
                     // Snapshot the m_craftUpgradeItem and recipe ingredient names for later analysis
                     int originalQuality = int.MinValue;
@@ -520,9 +520,11 @@ namespace ReforgedPotential
                     if (selectedRecipe == null) return true;
 
                     var player = Player.m_localPlayer;
-                    bool atUpgrader = player.GetCurrentCraftingStation() is not { m_upgrader: true };
+                    var station = player.GetCurrentCraftingStation();
+                    bool atUpgrader = station != null && station.m_upgrader;
+                    if (!atUpgrader) return true;
 
-                    if (atUpgrader && selectedItemData != null)
+                    if (selectedItemData != null)
                     {
                         foreach (var req in selectedRecipe.m_resources ?? Array.Empty<Piece.Requirement>())
                         {
@@ -540,6 +542,7 @@ namespace ReforgedPotential
 
                             int highestBossTier = UpgradeHelper.GetMaxBossTier();
                             originalRequirements.TryGetValue(selectedRecipe.m_item.name, out var originalResource);
+                            Jotunn.Logger.LogInfo($"original resource oncraft prefix {originalResource}");
                             int itemTier = UpgradeHelper.GetEquipmentTier(originalResource);
                             if (itemTier < 0)
                             {
@@ -589,6 +592,10 @@ namespace ReforgedPotential
                         }
                         return false;
                     }
+                    else
+                    {
+                        return true;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -607,18 +614,27 @@ namespace ReforgedPotential
                 var LogPrefix = "SetRecipePostfix: ";
                 try
                 {
-                    if (Player.m_localPlayer.GetCurrentCraftingStation() is not { m_upgrader: true })
-                    {
-                        Jotunn.Logger.LogDebug($"{LogPrefix}Player is not at an upgrader station.");
-                        return;
-                    }
+                    var player = Player.m_localPlayer;
+                    var station = player.GetCurrentCraftingStation();
+                    bool atUpgrader = station != null && station.m_upgrader;
+                    if (!atUpgrader) return;
 
                     var selectedRecipePair = __instance.m_selectedRecipe;
                     var selectedRecipe = selectedRecipePair.Recipe;
                     var selectedItemData = selectedRecipePair.ItemData;
                     if (!originalRequirements.ContainsKey(selectedRecipe.m_item.name))
                     {
-                        originalRequirements.Add(selectedRecipe.m_item.name, selectedRecipe.m_resources.FirstOrDefault(r => r.m_upgraderResource).m_resItem.name);
+                        foreach (var req in selectedRecipe.m_resources ?? Array.Empty<Piece.Requirement>())
+                        {
+                            if(req.m_upgraderResource)
+                            {
+                                var originalRequirement = req.m_resItem.name;
+                                originalRequirements.Add(selectedRecipe.m_item.name, originalRequirement);
+                                break;
+                            }
+                        }
+
+
                         originalRequirements.TryGetValue(selectedRecipe.m_item.name, out var originalResource);
                         Jotunn.Logger.LogDebug($"{LogPrefix}Storing original upgrader resource for {selectedItemData.m_shared.m_name} as {originalResource}");
                     }
