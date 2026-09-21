@@ -8,7 +8,7 @@ namespace ReforgedPotential
         {
             public static int GetMaxBossTier()
             {
-                if (ZoneSystem.instance.CheckKey("deafeated_frozenking", GameKeyType.Global) && ZoneSystem.instance.CheckKey("deafeated_frozenking_p3", GameKeyType.Global))
+                if (ZoneSystem.instance.CheckKey("defeated_frozenking", GameKeyType.Global) && ZoneSystem.instance.CheckKey("defeated_frozenking_p3", GameKeyType.Global))
                     return 8;
                 if (ZoneSystem.instance.CheckKey(Boss7Key, GameKeyType.Player))
                     return 7;
