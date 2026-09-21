@@ -33,7 +33,7 @@ namespace ReforgedPotential
     {
         public const string PluginGUID = "akuichi.ReforgedPotential";
         public const string PluginName = "Reforged Potential";
-        public const string PluginVersion = "2.0.1";
+        public const string PluginVersion = "2.0.2";
 
         
         private readonly Harmony harmony = new Harmony(PluginGUID);
