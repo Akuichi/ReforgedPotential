@@ -135,7 +135,7 @@ namespace ReforgedPotential
             RPC_Reforged.SendPackage(ZNet.instance.m_peers, new ZPackage(package.GetArray()));
             string message = package.ReadString();
             if (message != "")
-            { // Make sure it isn't empty
+            {
                 Jotunn.Logger.LogDebug($"[SERVER] Adding message to chat: {message}");
                 ChatHelpers.ResetChatHideTimer();
                 Chat.instance.AddString("Forge of Potential", message, Talker.Type.Shout);
@@ -148,7 +148,7 @@ namespace ReforgedPotential
             Jotunn.Logger.LogMessage($"Received blob, processing");
             string message = package.ReadString();
             if (message != "")
-            { // Make sure it isn't empty
+            {
                 ChatHelpers.ResetChatHideTimer();
                 Chat.instance.AddString("Forge of Potential", message, Talker.Type.Shout);
             }
@@ -178,17 +178,7 @@ namespace ReforgedPotential
         {
             public static void ResetChatHideTimer()
             {
-                try
-                {
-                    var chat = Chat.instance;
-                    if (chat == null) return;
-                    var field = typeof(Chat).GetField("m_hideTimer", BindingFlags.Instance | BindingFlags.NonPublic);
-                    if (field != null)
-                    {
-                        field.SetValue(chat, 0f);
-                    }
-                }
-                catch { /* non-critical */ }
+                Chat.instance.m_hideTimer = 0f;
             }
         }
 
@@ -375,6 +365,7 @@ namespace ReforgedPotential
                     // Snapshot the m_craftUpgradeItem and recipe ingredient names for later analysis
                     int originalQuality = int.MinValue;
                     string prefabName = null;
+                    string itemSharedName = null;
                     int variant = __instance.m_craftVariant;
                     var gridPos = new Vector2i();
                     var returnedIngredientNames = new List<string>();
@@ -388,6 +379,8 @@ namespace ReforgedPotential
                             originalQuality = itemData.m_quality;
                             gridPos = itemData.m_gridPos;
                             prefabName = itemData.m_dropPrefab.name;
+                            itemSharedName = itemData.m_shared.m_name;
+
                             Jotunn.Logger.LogDebug($"DoCraftingPrefix: Captured upgrade item snapshot: prefab={prefabName}, quality={originalQuality}, gridPos={gridPos}, variant={variant}");
                         }
                     }
@@ -397,7 +390,7 @@ namespace ReforgedPotential
                     {
                         __state = new DoCraftingState
                         {
-                            Snapshot = new UpgradeSnapshot { OriginalQuality = originalQuality, PrefabName = prefabName, GridPos = gridPos, Variant = variant }
+                            Snapshot = new UpgradeSnapshot { OriginalQuality = originalQuality, SharedName = itemSharedName, GridPos = gridPos, Variant = variant }
                         };
                         Jotunn.Logger.LogDebug($"DoCraftingPrefix: Created DoCraftingState with snapshot of upgrade item.");
                     }
@@ -427,9 +420,9 @@ namespace ReforgedPotential
                     var snapshot = __state.Snapshot;
                     if (newItem != null)
                     {
-                        if (newItem.m_dropPrefab.name != snapshot.PrefabName)
+                        if (newItem.m_shared.m_name != snapshot.SharedName)
                         {
-                            Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade result prefab name mismatch, assume its destroyed (original={snapshot.PrefabName}, new={newItem.m_dropPrefab.name})");
+                            Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade result prefab name mismatch, assume its destroyed (original={snapshot.SharedName}, new={newItem.m_shared.m_name})");
                             outcome = UpgradeOutcome.ReturnedIngredients;
                         }
                         else
@@ -473,7 +466,7 @@ namespace ReforgedPotential
                         outcome = UpgradeOutcome.ReturnedIngredients;
                     }
                     string playerName = player.GetPlayerName();
-                    string itemName = __state.Snapshot.PrefabName ?? "<unknown item>";
+                    string itemName = __state.Snapshot.SharedName ?? "<unknown item>";
                     itemName = Localization.instance.Localize(itemName);
 
                     int targetLevel = snapshot.OriginalQuality + 1;
@@ -492,7 +485,7 @@ namespace ReforgedPotential
             private class UpgradeSnapshot
             {
                 public int OriginalQuality;
-                public string PrefabName;
+                public string SharedName;
                 public int Variant;
                 public Vector2i GridPos;
             }
