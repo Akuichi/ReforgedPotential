@@ -429,7 +429,8 @@ namespace ReforgedPotential
                     {
                         if (newItem.m_dropPrefab.name != snapshot.PrefabName)
                         {
-                            Jotunn.Logger.LogError($"DoCraftingPostfix: Upgrade result prefab name mismatch (original={snapshot.PrefabName}, new={newItem.m_dropPrefab.name})");
+                            Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade result prefab name mismatch, assume its destroyed (original={snapshot.PrefabName}, new={newItem.m_dropPrefab.name})");
+                            outcome = UpgradeOutcome.ReturnedIngredients;
                         }
                         else
                         {
@@ -468,7 +469,8 @@ namespace ReforgedPotential
                     }
                     else
                     {
-                        Jotunn.Logger.LogDebug($"DoCraftingPostfix: No item found at grid position ({gridPosX},{gridPosY}) after crafting.");
+                        Jotunn.Logger.LogInfo($"DoCraftingPostfix: No item found at grid position ({gridPosX},{gridPosY}) after crafting, assuming destroyed");
+                        outcome = UpgradeOutcome.ReturnedIngredients;
                     }
                     string playerName = player.GetPlayerName();
                     string itemName = __state.Snapshot.PrefabName ?? "<unknown item>";
@@ -741,8 +743,10 @@ namespace ReforgedPotential
                                         var prefab = ObjectDB.instance.GetItemPrefab(resource);
                                         if (prefab != null && prefab.TryGetComponent(out ItemDrop itemDrop))
                                         {
-                                            Jotunn.Logger.LogDebug($"{LogPrefix}Keeping original resource {itemDrop.name} and setting amount to {cost}.");
+                                            Jotunn.Logger.LogInfo($"{LogPrefix}Keeping original resource {itemDrop.name} and setting amount to {cost}.");
                                             selectedResource.m_resItem = itemDrop;
+                                            selectedResource.m_resItem.m_itemData.m_shared.m_upgradeChance = UpgradeChance.Value;
+                                            selectedResource.m_resItem.m_itemData.m_shared.m_breakChance = BreakChance.Value;
                                             selectedResource.m_amount = cost;
                                         }
                                         else
@@ -758,7 +762,7 @@ namespace ReforgedPotential
                                             var prefab = ObjectDB.instance.GetItemPrefab($"Upgrader{equivTier}Weapon");
                                             if (prefab != null && prefab.TryGetComponent(out ItemDrop itemDrop))
                                             {
-                                                Jotunn.Logger.LogDebug($"{LogPrefix}Found prefab for Upgrader{equivTier}Weapon. Setting resource to {itemDrop.name} with amount {cost}.");
+                                                Jotunn.Logger.LogInfo($"{LogPrefix}Found prefab for Upgrader{equivTier}Weapon. Setting resource to {itemDrop.name} with amount {cost}.");
                                                 selectedResource.m_resItem = itemDrop;   
                                                 selectedResource.m_resItem.m_itemData.m_shared.m_upgradeChance = UpgradeChance.Value;
                                                 selectedResource.m_resItem.m_itemData.m_shared.m_breakChance = BreakChance.Value;
@@ -771,7 +775,7 @@ namespace ReforgedPotential
                                             var prefab = ObjectDB.instance.GetItemPrefab($"Upgrader{equivTier}Armor");
                                             if (prefab != null && prefab.TryGetComponent(out ItemDrop itemDrop))
                                             {
-                                                Jotunn.Logger.LogDebug($"{LogPrefix}Found prefab for Upgrader{equivTier}Armor. Setting resource to {itemDrop.name} with amount {cost}.");
+                                                Jotunn.Logger.LogInfo($"{LogPrefix}Found prefab for Upgrader{equivTier}Armor. Setting resource to {itemDrop.name} with amount {cost}.");
                                                 selectedResource.m_resItem = itemDrop;
                                                 selectedResource.m_resItem.m_itemData.m_shared.m_upgradeChance = UpgradeChance.Value;
                                                 selectedResource.m_resItem.m_itemData.m_shared.m_breakChance = BreakChance.Value;
@@ -780,7 +784,7 @@ namespace ReforgedPotential
                                         }
                                         else
                                         {
-                                            Jotunn.Logger.LogDebug($"{LogPrefix}Selected resource is neither weapon nor armor. Setting cost to {cost}.");
+                                            Jotunn.Logger.LogError($"{LogPrefix}Selected resource is neither weapon nor armor. Setting cost to {cost}.");
                                         }
                                     }
                                 }
