@@ -92,6 +92,7 @@ namespace ReforgedPotential
 
         internal static ConfigEntry<float> UpgradeChance;
         internal static ConfigEntry<float> BreakChance;
+        internal static ConfigEntry<bool> ConsumeResourcesOnlyOnFailure;
         internal static ConfigEntry<int> CostStart;
         internal static ConfigEntry<int> CostIncreaseInterval;
         internal static ConfigEntry<int> CostIncreasePerInterval;
@@ -210,6 +211,9 @@ namespace ReforgedPotential
                 new ConfigDescription("Chance for an upgrade to succeed.", floatRange, isAdminOnly));
             BreakChance = Config.Bind("Upgrade Settings", "02. BreakChance", 0f,
                 new ConfigDescription("Chance for an upgrade to fail and break the item when failing the upgrade check, failing this check results in losing 1 level instead", floatRange, isAdminOnly));
+            
+            ConsumeResourcesOnlyOnFailure = Config.Bind("Upgrade Settings", "03. Consume Resources Only On Failure", false,
+                new ConfigDescription("If true, resources are just consumed and the item doesn't lose a level (Breaking still removes the item)", null, isAdminOnly));
 
             AcceptableValueRange<int> intRange = new AcceptableValueRange<int>(0, 1000);
 
@@ -426,10 +430,12 @@ namespace ReforgedPotential
                             {
                                 outcome = UpgradeOutcome.Degraded;
                                 // replace item when going below 1
-                                if (newItem.m_quality < 1)
+
+                                if (newItem.m_quality < 1 || ConsumeResourcesOnlyOnFailure.Value)
                                 {
-                                    Jotunn.Logger.LogDebug("DoCraftingPostfix: Item degraded below 1, replacing with new item.");
+                                    Jotunn.Logger.LogDebug("DoCraftingPostfix: Item degraded below 1 or ConsumeResourcesOnlyOnFailure is true, replacing with new item.");
                                     var replacerPrefabName = newItem.m_dropPrefab.name;
+                                    var replacerSharedName = newItem.m_shared.m_name;
                                     var replacerStack = newItem.m_stack;
                                     var replacerQuality = snapshot.OriginalQuality;
                                     var replacerVariant = newItem.m_variant;
@@ -438,9 +444,8 @@ namespace ReforgedPotential
                                     var replacerIsCheated = newItem.m_cheated;
                                     player.GetInventory().RemoveItem(newItem);
                                     var replacerItemData = player.GetInventory().AddItem(replacerPrefabName, replacerStack, replacerQuality, replacerVariant, replacerCrafterId, replacerCrafterName, snapshot.GridPos, replacerIsCheated);
-                                    Jotunn.Logger.LogDebug("DoCraftingPostfix: Replacement item added to inventory: " + replacerItemData.m_dropPrefab.name + " with quality " + replacerItemData.m_quality);
-                                    MethodInfo method = AccessTools.Method(typeof(InventoryGui),"UpdateCraftingPanel");
-                                    method.Invoke(__instance, new object[] { false });
+                                    Jotunn.Logger.LogDebug("DoCraftingPostfix: Replacement item added to inventory: " + replacerSharedName + " with quality " + replacerItemData.m_quality);
+                                    InventoryGui.instance.UpdateCraftingPanel();
                                 }
                             }
                             else
