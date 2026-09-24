@@ -3,6 +3,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
+using UnityEngine;
 using static Mono.Security.X509.X520;
 namespace ReforgedPotential
 {
@@ -157,39 +158,77 @@ namespace ReforgedPotential
                 return baseItemTier;
             }
 
-            public static Dictionary<int, int> GetTotalIdolCosts(string originalResource, int currentQuality)
+            public static Dictionary<string, int> GetTotalIdolCosts( string originalResource,int currentQuality,int startLevelToCalculateFrom)
             {
-                var idolCosts = new Dictionary<int, int>();
+                var idolCosts = new Dictionary<string, int>();
 
-                if (string.IsNullOrEmpty(originalResource) || currentQuality <= 1)
+                if (string.IsNullOrEmpty(originalResource) ||  currentQuality <= 1 || startLevelToCalculateFrom > currentQuality)
                 {
+                    if (EnableDebugLogging.Value)
+                    {
+                        Jotunn.Logger.LogInfo(
+                            $"GetTotalIdolCosts: invalid input. " +
+                            $"originalResource={originalResource}, " +
+                            $"currentQuality={currentQuality}, " +
+                            $"startLevelToCalculateFrom={startLevelToCalculateFrom}. " +
+                            "Returning empty idolCosts.");
+                    }
                     return idolCosts;
                 }
 
                 int baseTier = GetEquipmentTier(originalResource);
                 if (baseTier < 0)
                 {
+                    if (EnableDebugLogging.Value)
+                    {
+                        Jotunn.Logger.LogInfo($"GetTotalIdolCosts: baseTier < 0 for originalResource={originalResource}. Returning empty idolCosts.");
+                    }
+
                     return idolCosts;
                 }
 
-                int configuredMaxBoss =
-                    bossUpgradeValues != null && bossUpgradeValues.Count > 0
-                        ? bossUpgradeValues.Keys.Max()
-                        : 8;
-
-                for (int qualityLevel = 1; qualityLevel < currentQuality; qualityLevel++)
+                string equipmentType;
+                if (originalResource.Contains("Weapon"))
                 {
-                    GetEquivalentUpgradeValues( baseTier, qualityLevel, configuredMaxBoss, out int idolTier, out int candidateQuality);
+                    equipmentType = "Weapon";
+                }
+                else if (originalResource.Contains("Armor"))
+                {
+                    equipmentType = "Armor";
+                }
+                else
+                {
+                    if (EnableDebugLogging.Value)
+                    {
+                        Jotunn.Logger.LogInfo($"GetTotalIdolCosts: originalResource={originalResource} is neither Weapon nor Armor. Returning empty idolCosts.");
+                    }
+
+                    return idolCosts;
+                }
+
+                int configuredMaxBoss = bossUpgradeValues != null && bossUpgradeValues.Count > 0 ? bossUpgradeValues.Keys.Max() : 8;
+
+                int firstQualityLevel = Math.Max(1, startLevelToCalculateFrom);
+
+                for (int qualityLevel = firstQualityLevel; qualityLevel < currentQuality; qualityLevel++)
+                {
+                    GetEquivalentUpgradeValues(
+                        baseTier,
+                        qualityLevel,
+                        configuredMaxBoss,
+                        out int idolTier,
+                        out int candidateQuality);
 
                     int cost = GetUpgradeCost(candidateQuality);
+                    string idolResource = $"Upgrader{idolTier}{equipmentType}";
 
-                    if (idolCosts.ContainsKey(idolTier))
+                    if (idolCosts.ContainsKey(idolResource))
                     {
-                        idolCosts[idolTier] += cost;
+                        idolCosts[idolResource] += cost;
                     }
                     else
                     {
-                        idolCosts.Add(idolTier, cost);
+                        idolCosts.Add(idolResource, cost);
                     }
                 }
 

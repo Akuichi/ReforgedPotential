@@ -9,7 +9,11 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Reflection;
+using UnityEngine;
+using static AudioMan;
+using static ClutterSystem;
 using static ItemDrop;
 using static Version;
 using Logger = Jotunn.Logger;
@@ -26,14 +30,6 @@ namespace ReforgedPotential
 
         
         private readonly Harmony harmony = new Harmony(PluginGUID);
-
-        const string Boss1Key = "GP_Eikthyr";
-        const string Boss2Key = "GP_TheElder";
-        const string Boss3Key = "GP_Bonemass";
-        const string Boss4Key = "GP_Moder";
-        const string Boss5Key = "GP_Yagluth";
-        const string Boss6Key = "GP_Queen";
-        const string Boss7Key = "GP_Fader";
 
         #region Config Entries
         internal static ConfigEntry<bool> EnableServerSync;
@@ -92,15 +88,16 @@ namespace ReforgedPotential
 
         internal static ConfigEntry<float> UpgradeChance;
         internal static ConfigEntry<float> BreakChance;
-        internal static ConfigEntry<bool> ConsumeResourcesOnlyOnFailure;
+        internal static ConfigEntry<bool> ConsumeIdolsOnlyOnFailure;
         internal static ConfigEntry<int> CostStart;
         internal static ConfigEntry<int> CostIncreaseInterval;
         internal static ConfigEntry<int> CostIncreasePerInterval;
         internal static ConfigEntry<int> CostScalingLevelStart;
-
-
         internal static ConfigEntry<float> UpgradeBaseDuration;
         internal static ConfigEntry<float> UpgradeDurationIncreasePerLevel;
+        internal static ConfigEntry<bool> RefundIdolsOnBreak;
+        internal static ConfigEntry<int> RefundIdolsOnBreakStartingLevel;
+        internal static ConfigEntry<float> RefundIdolsPercentageOnBreak;
         public static CustomRPC RPC_Reforged;
         public static ConfigEntry<bool> EnableGlobalUpgradeNotifications;
         public static ConfigEntry<string> SuccessMessage;
@@ -182,7 +179,7 @@ namespace ReforgedPotential
             // Subscribe to the event that fires whenever the config is reloaded.
             configFileWatcher.OnConfigFileReloaded += () =>
             {
-                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Config file reloaded, reinitializing config values.");
+                Jotunn.Logger.LogInfo("Config file reloaded, reinitializing config values.");
                 InitConfig();
             };
         }
@@ -197,10 +194,10 @@ namespace ReforgedPotential
             EnableGlobalUpgradeNotifications = Config.Bind("Global Notifications","01. Enable Global Upgrade Notifications",false,
                 new ConfigDescription("Broadcast a message to all online players when someone attempts an upgrade.", null, isAdminOnly));
 
-            SuccessMessage = Config.Bind("Global Notifications","02. Success Message","'{PlayerName}' successfully upgraded '{ItemName}' to level '{Level}'.",
+            SuccessMessage = Config.Bind("Global Notifications","02. Success Message","{PlayerName} successfully upgraded {ItemName} to level {Level}.",
                 new ConfigDescription("Message shown on successful upgrade. Supports {PlayerName}, {ItemName}, {Level}.", null, isAdminOnly));
 
-            FailedMessage = Config.Bind("Global Notifications","03. Failed Message","'{PlayerName}' tried to upgrade '{ItemName}' to level '{Level}', but failed.",
+            FailedMessage = Config.Bind("Global Notifications","03. Failed Message","{PlayerName} tried to upgrade {ItemName} to level {Level}, but failed.",
                 new ConfigDescription("Message shown on failed upgrade. Supports {PlayerName}, {ItemName}, {Level}.", null, isAdminOnly));
             #endregion
             //----------------
@@ -208,28 +205,30 @@ namespace ReforgedPotential
             AcceptableValueRange<float> floatRange = new AcceptableValueRange<float>(0, 1);
             UpgradeChance = Config.Bind("Upgrade Settings", "01. Upgrade Chance", 1f,
                 new ConfigDescription("Chance for an upgrade to succeed.", floatRange, isAdminOnly));
-            BreakChance = Config.Bind("Upgrade Settings", "02. BreakChance", 0f,
-                new ConfigDescription("Chance for an upgrade to fail and break the item when failing the upgrade check, failing this check results in losing 1 level instead", floatRange, isAdminOnly));
-            
-            ConsumeResourcesOnlyOnFailure = Config.Bind("Upgrade Settings", "03. Consume Resources Only On Failure", false,
-                new ConfigDescription("If true, resources are just consumed and the item doesn't lose a level (Breaking still removes the item)", null, isAdminOnly));
+            BreakChance = Config.Bind("Upgrade Settings", "02. Break Chance", 0f,
+                new ConfigDescription("When an upgrade fails, this is the chance for it to break (Ex. 1 = Item will always break on upgrade failure, 0 = Item will just degrade 1 level on upgrade failure)", floatRange, isAdminOnly));
+            ConsumeIdolsOnlyOnFailure = Config.Bind("Upgrade Settings", "03. Consume Idols Only On Failure", false,
+                new ConfigDescription("If true, idols are just consumed and the item doesn't lose a level (Breaking still removes the item)", null, isAdminOnly));
 
             AcceptableValueRange<int> intRange = new AcceptableValueRange<int>(0, 1000);
 
-            CostStart = Config.Bind("Upgrade Settings", "03. Cost Start", 1, new ConfigDescription("Base idol cost for upgrades. (Game Default is 1)", intRange, isAdminOnly));
-            CostIncreasePerInterval = Config.Bind("Upgrade Settings", "04. Cost Increase Per Interval", 1,
+            CostStart = Config.Bind("Upgrade Settings", "04. Cost Start", 1, new ConfigDescription("Base idol cost for upgrades. (Game Default is 1)", intRange, isAdminOnly));
+            CostIncreasePerInterval = Config.Bind("Upgrade Settings", "05. Cost Increase Per Interval", 1,
                 new ConfigDescription("Additional ingredient cost each time the cost scaling interval is reached starting at CostScalingLevelStart. (Starting at level X, the upgrade cost increases by this amount every Y levels. For example, with an increase of 1 every 2 levels starting at level 6: levels 1–5 cost 1, levels 6–7 cost 2, levels 8–9 cost 3, and so on.)", null, isAdminOnly));
-            CostIncreaseInterval = Config.Bind("Upgrade Settings", "05. Cost Increase Interval", 1,
+            CostIncreaseInterval = Config.Bind("Upgrade Settings", "06. Cost Increase Interval", 1,
                 new ConfigDescription("Number of levels between each cost increase. Set to 0 to disable cost scaling.", intRange, isAdminOnly));
-            CostScalingLevelStart = Config.Bind("Upgrade Settings", "06. Cost Scaling Level Start", 1,
-                new ConfigDescription("Level after at which cost scaling starts.", intRange, isAdminOnly));
-            
-            UpgradeBaseDuration = Config.Bind("Upgrade Settings", "07. Upgrade Base Duration", 2f,
-                new ConfigDescription("Base crafting duration for upgrading. (Game Default is 8)", null, isAdminOnly));
-            UpgradeDurationIncreasePerLevel = Config.Bind("Upgrade Settings", "08. Upgrade Duration Increase Per Level", 1f,
-                new ConfigDescription("Additional crafting duration per item level. (Game Default is 1)", null, isAdminOnly));
-            EnableDebugLogging = Config.Bind("Logging", "09. Enable Debug Logging", false,
-                new ConfigDescription("Show debug logging", null));
+            CostScalingLevelStart = Config.Bind("Upgrade Settings", "07. Cost Scaling Level Start", 1,
+                new ConfigDescription("Level after at which cost scaling starts.", intRange, isAdminOnly));            
+            UpgradeBaseDuration = Config.Bind("Upgrade Settings", "08. Upgrade Base Duration", 2f,
+                new ConfigDescription("Base crafting duration for upgrading. This is the base time it takes to upgrade an equipment (Game Default is 8)", null, isAdminOnly));
+            UpgradeDurationIncreasePerLevel = Config.Bind("Upgrade Settings", "09. Upgrade Duration Increase Per Level", 1f,
+                new ConfigDescription("Additional crafting duration per item level. This is the additional time added per item level to the total crafting time. (Game Default is 1)", null, isAdminOnly));
+            RefundIdolsOnBreak = Config.Bind("Upgrade Settings", "10. Refund Idols On Break", false,
+                new ConfigDescription("If true, a percentage of the idols used are refunded when an equipment breaks", null, isAdminOnly));
+            RefundIdolsOnBreakStartingLevel = Config.Bind("Upgrade Settings", "11. Refund Idols On Break Starting Level", 5,
+                new ConfigDescription("Calculation of the refunded idols starts at this level. (Ex. at value 5: Levels 1-4 are not included for the idol refund calculations", intRange, isAdminOnly));
+            RefundIdolsPercentageOnBreak = Config.Bind("Upgrade Settings", "12. Refund Idols Percentage On Break", 0.3f,
+                new ConfigDescription("Percentage of idols refunded when an equipment breaks.", floatRange, isAdminOnly));
             #endregion
             //--------------
             #region Boss Progression
@@ -335,6 +334,8 @@ namespace ReforgedPotential
                 new ConfigDescription("Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
             #endregion
 
+            EnableDebugLogging = Config.Bind("Logging", "01. Enable Debug Logging", false,
+                new ConfigDescription("Show debug logging", null));
 
             AddConfigurableRecipes();
 
@@ -347,154 +348,252 @@ namespace ReforgedPotential
             #region DoCrafting Prefix/Postfix
             [HarmonyPrefix]
             [HarmonyPatch(nameof(InventoryGui.DoCrafting))]
-            static bool DoCraftingPrefix(InventoryGui __instance, Player player, out DoCraftingState __state)
+            static bool DoCraftingPrefix(InventoryGui __instance, Player player)
             {
-                __state = null;
                 try
                 {
-                    var station = player.GetCurrentCraftingStation();
-                    bool atUpgrader = station.m_upgrader;
-                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPrefix: Player is at upgrader station: {atUpgrader}, station name: {station.name}" );
-                    if (!atUpgrader) return true;
-                    // Snapshot the m_craftUpgradeItem and recipe ingredient names for later analysis
-                    int originalQuality = int.MinValue;
-                    string prefabName = null;
-                    string itemSharedName = null;
-                    int variant = __instance.m_craftVariant;
-                    var gridPos = new Vector2i();
-                    var returnedIngredientNames = new List<string>();
-                    ItemData itemData = null;
-                    try
+                    CraftingStation currentCraftingStation = player.GetCurrentCraftingStation();
+                    bool isUpgraderStation = currentCraftingStation != null && currentCraftingStation.m_upgrader;
+                    if (!isUpgraderStation)
                     {
-                        itemData = __instance.m_craftUpgradeItem;
+                        return true;
+                    }
+                    int originalQuality = __instance.m_craftUpgradeItem.m_quality;
+                    int craftQuality = originalQuality + 1;
+                    int requiredResourceAmount;
+                    ItemData singleIngredient;
+                    int craftMultiplier = 1;
+                    int craftedItemAmount = __instance.m_craftRecipe.GetAmount(craftQuality, out requiredResourceAmount, out singleIngredient, craftMultiplier);
+                    string upgradeItemName = __instance.m_craftUpgradeItem.m_shared.m_name;
+                    bool hasCraftUpgradeItem = __instance.m_craftUpgradeItem == null || player.GetInventory().ContainsItem(__instance.m_craftUpgradeItem);
+                    bool hasRequiredSingleIngredient =!__instance.m_craftRecipe.m_requireOnlyOneIngredient || singleIngredient != null;
+                    bool hasNoCraftCost = player.NoCostCheat() || ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoCraftCost);
+                    bool canAddCraftedItem =   __instance.m_craftUpgradeItem != null ||  player.GetInventory().CanAddItem(__instance.m_craftRecipe.m_item.gameObject, 1);
+                    var sharedName = __instance.m_craftUpgradeItem.m_shared.m_name ?? "Unknown Item";
+                    if (!canAddCraftedItem)
+                    {
+                        return false;
+                    }
+                    int craftedItemVariant = __instance.m_craftVariant;
+                    Vector2i craftedItemPosition = new Vector2i(-1, -1);
 
-                        if (itemData != null)
+                    if (__instance.m_craftUpgradeItem != null)
+                    {
+                        craftedItemPosition = __instance.m_craftUpgradeItem.m_gridPos;
+                        craftedItemVariant = __instance.m_craftUpgradeItem.m_variant;
+
+                        player.UnequipItem(__instance.m_craftUpgradeItem);
+                        player.GetInventory().RemoveItem(__instance.m_craftUpgradeItem);
+                    }
+
+                    long playerId = player.GetPlayerID();
+                    string playerName = player.GetPlayerName();
+
+                    bool inventoryContainsCheatedItems = player.GetInventory().ItemCheated(__instance.m_craftRecipe.m_resources);
+
+                    bool craftingStationWasCheated = currentCraftingStation?.GetComponent<ZNetView>().GetZDO().GetBool(ZDOVars.s_cheated) ?? false;
+
+                    bool craftWasCheated = (inventoryContainsCheatedItems || player.NoCostCheat() || craftingStationWasCheated) && !PlayerProfile.s_bypassCheatChecks;
+                    var outcome = UpgradeOutcome.Unknown;
+
+                    ItemData craftedItem = null;
+                    bool upgradeSucceeded = false;
+
+                    ItemData upgraderResourceItem = null;
+
+                    foreach (Piece.Requirement requirement in __instance.m_craftRecipe.m_resources)
+                    {
+                        if (requirement.m_upgraderResource)
                         {
-                            originalQuality = itemData.m_quality;
-                            gridPos = itemData.m_gridPos;
-                            prefabName = itemData.m_dropPrefab.name;
-                            itemSharedName = itemData.m_shared.m_name;
-
-                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPrefix: Captured upgrade item snapshot: prefab={prefabName}, quality={originalQuality}, gridPos={gridPos}, variant={variant}");
+                            upgraderResourceItem = requirement.m_resItem.m_itemData;
+                            break;
                         }
                     }
-                    catch {}
 
-                    if (itemData != null)
+                    if (upgraderResourceItem == null)
                     {
-                        __state = new DoCraftingState
-                        {
-                            Snapshot = new UpgradeSnapshot { OriginalQuality = originalQuality, SharedName = itemSharedName, GridPos = gridPos, Variant = variant, PrefabName = prefabName }
-                        };
-                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPrefix: Created DoCraftingState with snapshot of upgrade item.");
+                        player.Message(MessageHud.MessageType.Center, "$msg_missingrequirement");
+                        ZLog.LogError("No upgrader resource found in inventory");
+                        return false;
                     }
-                }
-                catch (Exception ex)
-                {
-                    Jotunn.Logger.LogWarning($"DoCrafting prefix snapshot exception: {ex}");
-                }
-                return true;
-            }
 
-            [HarmonyPostfix]
-            [HarmonyPatch(nameof(InventoryGui.DoCrafting))]
-            static void DoCraftingPostfix(object __instance, Player player, DoCraftingState __state)
-            {
-                try
-                {
-                    if (__state?.Snapshot == null) return;
-                    var station = player.GetCurrentCraftingStation();
-                    bool atUpgrader = station != null && station.m_upgrader;
-                    if (!atUpgrader) return;
-                    var gridPosX = __state.Snapshot.GridPos.x;
-                    var gridPosY = __state.Snapshot.GridPos.y;
-                    var newItem = player.GetInventory().GetItemAt(gridPosX, gridPosY);
-                    var outcome = UpgradeOutcome.Unknown;
-                    var snapshot = __state.Snapshot;
-                    if (newItem != null)
-                    {                        
-                        if (newItem.m_shared.m_name != snapshot.SharedName)
+                    float upgradeRandomRoll = UnityEngine.Random.Range(0f, 1f);
+                    float breakRandomRoll = UnityEngine.Random.Range(0f, 1f);
+                    Jotunn.Logger.LogInfo($"DoCraftingPrefix: Upgrade roll: {upgradeRandomRoll * 100}, Break roll: {breakRandomRoll * 100}, Upgrade chance: {UpgradeChance.Value * 100}%, Break chance: {BreakChance.Value * 100}%");
+
+                    // Success
+                    if (UpgradeChance.Value >= upgradeRandomRoll)
+                    {
+                        ZLog.Log($"Upgrader <color=yellow>succeeded</color> on " + $"{__instance.m_craftUpgradeItem.m_shared.m_name} level {craftQuality}!");
+                        player.Message(MessageHud.MessageType.Center, Localization.instance.Localize("$msg_upgrader_success", __instance.m_craftUpgradeItem.m_shared.m_name, craftQuality.ToString()), 0, null, log: true);
+
+                        craftedItem = player.GetInventory().AddItem(
+                            __instance.m_craftRecipe.m_item.gameObject.name,
+                            1,
+                            craftQuality,
+                            craftedItemVariant,
+                            playerId,
+                            playerName,
+                            craftedItemPosition,
+                            craftWasCheated);
+                        upgradeSucceeded = true;
+                        outcome = UpgradeOutcome.Upgraded;
+                    }
+                    // Break
+                    else if (BreakChance.Value >= breakRandomRoll)
+                    {
+                        ZLog.Log($"Upgrader <color=red>BROKE</color> " + $"{sharedName} level " + $"{craftQuality - 1} and was destroyed!");
+
+                        player.Message(MessageHud.MessageType.Center, Localization.instance.Localize("$msg_upgrader_broke", sharedName, (craftQuality - 1).ToString()), 0, null, log: true);
+
+                        outcome = UpgradeOutcome.Destroyed;
+                        // Refund resources
+                        if (upgraderResourceItem.m_shared
+                                .m_breakReturnIngreientsAmount > 0f)
                         {
-                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade result prefab name mismatch, assume its destroyed (original={snapshot.SharedName}, new={newItem.m_shared.m_name})");
-                            outcome = UpgradeOutcome.ReturnedIngredients;
+                            foreach (Piece.Requirement requirement in
+                                     __instance.m_craftRecipe.m_resources)
+                            {
+                                if (requirement.m_recover)
+                                {
+                                    int returnedResourceAmount = Mathf.CeilToInt((requirement.GetAmount(1) + requirement.GetAmount(craftQuality)) * upgraderResourceItem.m_shared.m_breakReturnIngreientsAmount);
+                                    if (returnedResourceAmount > 0)
+                                    {
+                                        craftedItem = player.GetInventory().AddItem(
+                                            requirement.m_resItem.name,
+                                            returnedResourceAmount,
+                                            requirement.m_resItem.m_itemData.m_quality,
+                                            requirement.m_resItem.m_itemData.m_variant,
+                                            playerId,
+                                            playerName,
+                                            new Vector2i(-1, -1),
+                                            craftWasCheated);
+
+                                        ZLog.Log($"Upgrader returned " + $"{requirement.m_resItem.m_itemData.m_shared.m_name} " + $"x{returnedResourceAmount} to inventory");
+                                    }
+                                }
+                            }
+                        }
+                        // Refund idols
+                        if (RefundIdolsOnBreak.Value)
+                        {
+                            var prefabName = __instance.m_selectedRecipe.Recipe.m_item.name;
+                            var originalResource = originalRequirements.TryGetValue(prefabName, out var resource) ? resource : null;
+                            var totalIdolCost = UpgradeHelper.GetTotalIdolCosts(originalResource, originalQuality, RefundIdolsOnBreakStartingLevel.Value);
+                            foreach (var kvp in totalIdolCost)
+                            {
+                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Total idol cost for {sharedName} at quality {originalQuality}: {kvp.Key} = {kvp.Value}");
+                                if (kvp.Value > 0)
+                                {
+                                    var itemPrefab = PrefabManager.Instance.GetPrefab(kvp.Key);
+                                    if (itemPrefab != null)
+                                    {
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"Attempting to refund {RefundIdolsPercentageOnBreak.Value * 100}% of {kvp.Key} x{kvp.Value}");
+                                        var refundAmount = Math.Max(1, (int)Math.Ceiling(kvp.Value * RefundIdolsPercentageOnBreak.Value));
+                                        if (player.GetInventory().AddItem(itemPrefab, refundAmount))
+                                        {
+                                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Refunded {refundAmount} of {kvp.Key} to player {player.GetPlayerName()}");
+                                        }
+                                        else
+                                        {
+                                            Instantiate<GameObject>(itemPrefab, player.transform.position + player.transform.forward * 2f + UnityEngine.Vector3.up, UnityEngine.Quaternion.identity);
+
+                                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Could not add {kvp.Key} to player {player.GetPlayerName()}'s inventory, dropped {refundAmount} at player's position.");
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogWarning($"DoCraftingPostfix: Could not find item prefab for {kvp.Key} to refund to player {player.GetPlayerName()}");
+                                    }
+                                }
+                            }
                         }
                         else
                         {
-                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade result item found at grid position ({gridPosX}," +
-                                $"{gridPosY}) with quality {newItem.m_quality} (original={snapshot.OriginalQuality})");
-                            if (newItem.m_quality > snapshot.OriginalQuality)
+                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Refund idols on break is disabled, skipping..");
+                        }
+                    }
+                    // Failure
+                    else
+                    {
+                        var failureCraftQuality = Mathf.Max(1, craftQuality - 2);
+                        ZLog.Log( $"Upgrader <color=orange>FAILED</color> " + $"{__instance.m_craftUpgradeItem.m_shared.m_name} level " + $"{craftQuality - 1}, level was reduced!");
+                        var failureMessage = "Upgrade failed!";
+                        if (ConsumeIdolsOnlyOnFailure.Value)
+                        {                            
+                            failureCraftQuality = __instance.m_craftUpgradeItem.m_quality;
+                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {sharedName}, level was not reduced due to 'Consume Idols Only On Failure' = True");
+                        }
+                        else
+                        {                            
+                            if (originalQuality == 1)
                             {
-                                outcome = UpgradeOutcome.Upgraded;
-                            }
-                            else if (newItem.m_quality < snapshot.OriginalQuality)
-                            {
-                                outcome = UpgradeOutcome.Degraded;
-                                // replace item when going below 1
-
-                                if (newItem.m_quality < 1 || ConsumeResourcesOnlyOnFailure.Value)
-                                {
-                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("DoCraftingPostfix: Item degraded below 1 or ConsumeResourcesOnlyOnFailure is true, replacing with new item.");
-                                    var replacerPrefabName = newItem.m_dropPrefab.name;
-                                    var replacerSharedName = newItem.m_shared.m_name;
-                                    var replacerStack = newItem.m_stack;
-                                    var replacerQuality = snapshot.OriginalQuality;
-                                    var replacerVariant = newItem.m_variant;
-                                    var replacerCrafterId = newItem.m_crafterID;
-                                    var replacerCrafterName = newItem.m_crafterName;
-                                    var replacerIsCheated = newItem.m_cheated;
-                                    player.GetInventory().RemoveItem(newItem);
-                                    var replacerItemData = player.GetInventory().AddItem(replacerPrefabName, replacerStack, replacerQuality, replacerVariant, replacerCrafterId, replacerCrafterName, snapshot.GridPos, replacerIsCheated);
-                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("DoCraftingPostfix: Replacement item added to inventory: " + replacerSharedName + " with quality " + replacerItemData.m_quality);
-                                    InventoryGui.instance.UpdateCraftingPanel();
-                                }
+                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {sharedName}, cannot change below level 1.");
                             }
                             else
                             {
-                                outcome = UpgradeOutcome.ReturnedIngredients;
+                                failureMessage = $"Upgrade failed, {sharedName}'s level was reduced!";
+                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {sharedName}, item level was reduced.");
                             }
+                        }
+                        craftedItem = player.GetInventory().AddItem(
+                            __instance.m_craftRecipe.m_item.gameObject.name,
+                            craftedItemAmount,
+                            failureCraftQuality,
+                            craftedItemVariant,
+                            playerId,
+                            playerName,
+                            craftedItemPosition,
+                            craftWasCheated);
+
+                        player.Message(MessageHud.MessageType.Center, failureMessage, 0, null, log: true);
+                        outcome = UpgradeOutcome.Degraded;
+                    }
+
+                    if (!hasNoCraftCost)
+                    {
+                        if (singleIngredient != null)
+                        {
+                            player.GetInventory().RemoveItem(singleIngredient.m_shared.m_name, requiredResourceAmount, singleIngredient.m_quality);
+                        }
+                        else
+                        {
+                            player.ConsumeResources(__instance.m_craftRecipe.m_resources, craftQuality, -1, craftMultiplier);
+                        }
+                    }
+                    __instance.UpdateCraftingPanel();
+
+                    if (currentCraftingStation != null)
+                    {
+                        if (upgradeSucceeded)
+                        {
+                            currentCraftingStation.m_craftItemDoneEffects.Create(player.transform.position,UnityEngine.Quaternion.identity);
+                        }
+                        else
+                        {
+                            currentCraftingStation.m_craftItemDoneFailEffects.Create(player.transform.position,UnityEngine.Quaternion.identity);
                         }
                     }
                     else
                     {
-                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: No item found at grid position ({gridPosX},{gridPosY}) after crafting, assuming destroyed");
-                        outcome = UpgradeOutcome.ReturnedIngredients;
+                        __instance.m_craftItemDoneEffects.Create(player.transform.position,UnityEngine.Quaternion.identity);
                     }
+                    var itemName = Localization.instance.Localize(upgradeItemName);
 
-                    if (outcome == UpgradeOutcome.ReturnedIngredients) // && Return value config true
-                    {
-                        var originalResource = originalRequirements.TryGetValue(snapshot.PrefabName, out var resource) ? resource : null;
-                        var totalIdolCost = UpgradeHelper.GetTotalIdolCosts(originalResource, snapshot.OriginalQuality);
-                        foreach (var kvp in totalIdolCost)
-                        {
-                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Total idol cost for {snapshot.SharedName} at quality {snapshot.OriginalQuality}: {kvp.Key} = {kvp.Value}");
-                        }
-                    }
-                    string playerName = player.GetPlayerName();
-                    string itemName = __state.Snapshot.SharedName ?? "<unknown item>";
-                    itemName = Localization.instance.Localize(itemName);
-
-                    int targetLevel = snapshot.OriginalQuality + 1;
+                    int targetLevel = craftQuality;
                     bool success = outcome == UpgradeOutcome.Upgraded;
                     BroadcastUpgradeResult(playerName, itemName, targetLevel, success);
+                    Gogan.LogEvent("Game","Crafted", __instance.m_craftRecipe.m_item.m_itemData.m_shared.m_name, craftQuality);
+                    return false;
+                
                 }
-                catch (Exception)
+                catch (Exception ex)
                 {
+                    Jotunn.Logger.LogWarning($"DoCrafting prefix exception: {ex}");
                 }
+                return true;
             }
-
-            private class DoCraftingState
-            {
-                public UpgradeSnapshot Snapshot;
-            }
-            private class UpgradeSnapshot
-            {
-                public int OriginalQuality;
-                public string SharedName;
-                public int Variant;
-                public Vector2i GridPos;
-                public string PrefabName;
-            }
-            private enum UpgradeOutcome { Upgraded, Degraded, Destroyed, ReturnedIngredients, Unchanged, Unknown }
+            private enum UpgradeOutcome { Upgraded, Degraded, Destroyed, Unknown }
             #endregion
             // Craft speed
             [HarmonyPrefix]
@@ -542,13 +641,11 @@ namespace ReforgedPotential
 
                             int highestBossTier = UpgradeHelper.GetMaxBossTier();
                             originalRequirements.TryGetValue(selectedRecipe.m_item.name, out var originalResource);
-                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"original resource oncraft prefix {originalResource}");
+                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"Original upgrader resource: {originalResource}");
                             int itemTier = UpgradeHelper.GetEquipmentTier(originalResource);
                             if (itemTier < 0)
                             {
-                                Jotunn.Logger.LogWarning(
-                                    $"Could not determine equipment tier for upgrader '{originalResource}'.");
-
+                                Jotunn.Logger.LogWarning($"Could not determine equipment tier for upgrader '{originalResource}'.");
                                 continue;
                             }
                             int maxUpgradeLevel = UpgradeHelper.GetMaxUpgradeLevel(itemTier, highestBossTier);
@@ -557,15 +654,6 @@ namespace ReforgedPotential
                             if (itemQuality >= maxUpgradeLevel)
                             {
                                 int requiredBoss = UpgradeHelper.GetRequiredBossForNextUpgrade(itemTier,itemQuality);
-
-                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo(
-                                    $"Player attempted to upgrade {selectedItemData.m_shared.m_name} " +
-                                    $"from quality {itemQuality} to {itemQuality + 1}. " +
-                                    $"Item tier={itemTier}, " +
-                                    $"highest boss tier={highestBossTier}, " +
-                                    $"max allowed={maxUpgradeLevel}, " +
-                                    $"required boss={requiredBoss}.");
-
                                 string requiredBossName =
                                     requiredBoss != -1 &&
                                     bossNames.TryGetValue(requiredBoss, out string bossName)
@@ -582,10 +670,7 @@ namespace ReforgedPotential
 
                                 player?.Message(
                                     MessageHud.MessageType.Center,
-                                    requiredBossName != null
-                                        ? $"Defeat {requiredBossName} to upgrade this weapon further."
-                                        : "Max upgrade level reached!");
-
+                                    requiredBossName != null ? $"Defeat {requiredBossName} to upgrade this weapon further.": "Max upgrade level reached!");
                                 return false;
                             }
                             return true;
@@ -659,9 +744,7 @@ namespace ReforgedPotential
 
                                     if (baseTier < 0)
                                     {
-                                        Jotunn.Logger.LogWarning(
-                                            $"{LogPrefix}Could not determine equipment tier for resource '{resource}'.");
-
+                                        Jotunn.Logger.LogWarning($"{LogPrefix}Could not determine equipment tier for resource '{resource}'.");
                                         continue;
                                     }
 
@@ -680,54 +763,60 @@ namespace ReforgedPotential
                                         $"cost={cost}.");
                                     selectedItemData.m_shared.m_breakReturnIngreientsAmount = 1;
                                     // Apply resource prefab & amount:
-                                    if ((!EnableIdolProgression.Value))
+                                    ItemDrop itemDrop = null;
+
+                                    if (!EnableIdolProgression.Value)
                                     {
-                                        var prefab = ObjectDB.instance.GetItemPrefab(resource);
-                                        if (prefab != null && prefab.TryGetComponent(out ItemDrop itemDrop))
+                                        var prefab = PrefabManager.Instance.GetPrefab(resource);
+
+                                        if (prefab != null && prefab.TryGetComponent(out itemDrop))
                                         {
-                                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"{LogPrefix}Keeping original resource {itemDrop.name} and setting amount to {cost}.");
-                                            selectedResource.m_resItem = itemDrop;
-                                            selectedResource.m_resItem.m_itemData.m_shared.m_upgradeChance = UpgradeChance.Value;
-                                            selectedResource.m_resItem.m_itemData.m_shared.m_breakChance = BreakChance.Value;
-                                            selectedResource.m_amount = cost;
+                                            if (EnableDebugLogging.Value)
+                                                Jotunn.Logger.LogInfo(
+                                                    $"{LogPrefix}Keeping original resource {itemDrop.name} and setting amount to {cost}.");
                                         }
                                         else
                                         {
-                                            Jotunn.Logger.LogError($"{LogPrefix}Could not find prefab for original resource '{resource}'.");
+                                            Jotunn.Logger.LogError(
+                                                $"{LogPrefix}Could not find prefab for original resource '{resource}'.");
                                         }
                                     }
                                     else
                                     {
-                                        if (selectedResource.m_resItem.name.Contains("Weapon"))
+                                        var resourceName = selectedResource.m_resItem.name;
+
+                                        string prefabName = resourceName.Contains("Weapon")
+                                            ? $"Upgrader{equivTier}Weapon"
+                                            : resourceName.Contains("Armor")
+                                                ? $"Upgrader{equivTier}Armor"
+                                                : null;
+
+                                        if (prefabName == null)
                                         {
-                                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"{LogPrefix}Selected resource is a weapon. Setting cost to {cost} and tier to {equivTier}.");
-                                            var prefab = ObjectDB.instance.GetItemPrefab($"Upgrader{equivTier}Weapon");
-                                            if (prefab != null && prefab.TryGetComponent(out ItemDrop itemDrop))
-                                            {
-                                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"{LogPrefix}Found prefab for Upgrader{equivTier}Weapon. Setting resource to {itemDrop.name} with amount {cost}.");
-                                                selectedResource.m_resItem = itemDrop;   
-                                                selectedResource.m_resItem.m_itemData.m_shared.m_upgradeChance = UpgradeChance.Value;
-                                                selectedResource.m_resItem.m_itemData.m_shared.m_breakChance = BreakChance.Value;           
-                                                selectedResource.m_amount = cost;
-                                            }
-                                        }
-                                        else if (selectedResource.m_resItem.name.Contains("Armor"))
-                                        {
-                                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"{LogPrefix}Selected resource is armor. Setting cost to {cost} and tier to {equivTier}.");
-                                            var prefab = ObjectDB.instance.GetItemPrefab($"Upgrader{equivTier}Armor");
-                                            if (prefab != null && prefab.TryGetComponent(out ItemDrop itemDrop))
-                                            {
-                                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"{LogPrefix}Found prefab for Upgrader{equivTier}Armor. Setting resource to {itemDrop.name} with amount {cost}.");
-                                                selectedResource.m_resItem = itemDrop;
-                                                selectedResource.m_resItem.m_itemData.m_shared.m_upgradeChance = UpgradeChance.Value;
-                                                selectedResource.m_resItem.m_itemData.m_shared.m_breakChance = BreakChance.Value;
-                                                selectedResource.m_amount = cost;
-                                            }
+                                            Jotunn.Logger.LogError( $"{LogPrefix}Selected resource is neither weapon nor armor. Setting cost to {cost}.");
                                         }
                                         else
                                         {
-                                            Jotunn.Logger.LogError($"{LogPrefix}Selected resource is neither weapon nor armor. Setting cost to {cost}.");
+                                            var prefab = PrefabManager.Instance.GetPrefab(prefabName);
+
+                                            if (prefab != null && prefab.TryGetComponent(out itemDrop))
+                                            {
+                                                if (EnableDebugLogging.Value)
+                                                    Jotunn.Logger.LogInfo(
+                                                        $"{LogPrefix}Found prefab for {prefabName}. Setting resource to {itemDrop.name} with amount {cost}.");
+                                            }
+                                            else
+                                            {
+                                                Jotunn.Logger.LogError(
+                                                    $"{LogPrefix}Could not find prefab '{prefabName}'.");
+                                            }
                                         }
+                                    }
+
+                                    if (itemDrop != null)
+                                    {
+                                        selectedResource.m_resItem = itemDrop;
+                                        selectedResource.m_amount = cost;
                                     }
                                 }
                             }
@@ -743,8 +832,6 @@ namespace ReforgedPotential
             }
             #endregion
         }
-
-
         private void AddConfigurableRecipes()
         {
             try
