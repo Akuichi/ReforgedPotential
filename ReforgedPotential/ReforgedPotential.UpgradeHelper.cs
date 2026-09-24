@@ -1,4 +1,6 @@
-﻿using System.Linq;
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
 namespace ReforgedPotential
 {
     public partial class ReforgedPotential
@@ -149,6 +151,108 @@ namespace ReforgedPotential
                     $"returning baseTier.");
 
                 return baseItemTier;
+            }
+
+            public static Dictionary<int, int> GetTotalIdolCosts(string originalResource, int currentQuality)
+            {
+                var idolCosts = new Dictionary<int, int>();
+
+                if (string.IsNullOrEmpty(originalResource) || currentQuality <= 1)
+                {
+                    return idolCosts;
+                }
+
+                int baseTier = GetEquipmentTier(originalResource);
+                if (baseTier < 0)
+                {
+                    return idolCosts;
+                }
+
+                int configuredMaxBoss =
+                    bossUpgradeValues != null && bossUpgradeValues.Count > 0
+                        ? bossUpgradeValues.Keys.Max()
+                        : 8;
+
+                for (int qualityLevel = 1; qualityLevel < currentQuality; qualityLevel++)
+                {
+                    GetEquivalentUpgradeValues( baseTier, qualityLevel, configuredMaxBoss, out int idolTier, out int candidateQuality);
+
+                    int cost = GetUpgradeCost(candidateQuality);
+
+                    if (idolCosts.ContainsKey(idolTier))
+                    {
+                        idolCosts[idolTier] += cost;
+                    }
+                    else
+                    {
+                        idolCosts.Add(idolTier, cost);
+                    }
+                }
+
+                return idolCosts;
+            }
+
+            public static int GetUpgradeCost(int candidateQuality)
+            {
+                int level = Math.Max(0, candidateQuality - 1);
+                int costStartLevel = Math.Max(1, CostScalingLevelStart.Value);
+                int cost = CostStart.Value;
+
+                if (CostIncreaseInterval.Value > 0 && level >= costStartLevel)
+                {
+                    cost += ((level - costStartLevel) / CostIncreaseInterval.Value + 1)
+                        * CostIncreasePerInterval.Value;
+                }
+
+                return cost;
+            }
+
+            public static void GetEquivalentUpgradeValues(int baseTier,int qualityLevel,int configuredMaxBoss, out int equivalentTier,out int candidateQuality)
+            {
+                int candidateMax;
+
+                if (!EnableBossProgression.Value && !EnableIdolProgression.Value)
+                {
+                    equivalentTier = baseTier;
+                    candidateMax = GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
+                    candidateQuality = Math.Max(1, Math.Min(candidateMax, qualityLevel));
+                    return;
+                }
+
+                if (!EnableBossProgression.Value && EnableIdolProgression.Value)
+                {
+                    int tierBlock = Math.Max(0, (qualityLevel - 1) / 4);
+                    int desiredTier = baseTier + tierBlock;
+                    int maxAvailableTier = bossUpgradeValues != null && bossUpgradeValues.Count > 0
+                        ? bossUpgradeValues.Keys.Max()
+                        : 8;
+
+                    desiredTier = Math.Min(desiredTier, maxAvailableTier);
+
+                    int actualBlocksUsed = Math.Max(0, desiredTier - baseTier);
+
+                    equivalentTier = desiredTier;
+                    candidateQuality = qualityLevel - actualBlocksUsed * 4;
+                    candidateQuality = Math.Max(1, Math.Min(4, candidateQuality));
+                    return;
+                }
+
+                if (EnableBossProgression.Value && !EnableIdolProgression.Value)
+                {
+                    equivalentTier = baseTier;
+                    candidateMax = GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
+                    candidateQuality = Math.Max(1, Math.Min(candidateMax, qualityLevel));
+                    return;
+                }
+
+                equivalentTier = GetEquivalentTier(baseTier, qualityLevel, configuredMaxBoss);
+
+                int baseMax = GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
+                candidateMax = GetMaxUpgradeLevel(equivalentTier, configuredMaxBoss);
+                int distanceFromMax = baseMax - qualityLevel;
+
+                candidateQuality = candidateMax - distanceFromMax;
+                candidateQuality = Math.Max(1, Math.Min(candidateMax, candidateQuality));
             }
         }
 

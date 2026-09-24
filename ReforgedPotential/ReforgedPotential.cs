@@ -383,7 +383,7 @@ namespace ReforgedPotential
                     {
                         __state = new DoCraftingState
                         {
-                            Snapshot = new UpgradeSnapshot { OriginalQuality = originalQuality, SharedName = itemSharedName, GridPos = gridPos, Variant = variant }
+                            Snapshot = new UpgradeSnapshot { OriginalQuality = originalQuality, SharedName = itemSharedName, GridPos = gridPos, Variant = variant, PrefabName = prefabName }
                         };
                         Jotunn.Logger.LogDebug($"DoCraftingPrefix: Created DoCraftingState with snapshot of upgrade item.");
                     }
@@ -397,12 +397,11 @@ namespace ReforgedPotential
 
             [HarmonyPostfix]
             [HarmonyPatch(nameof(InventoryGui.DoCrafting))]
-            static void DoCraftingPostfix(object __instance, DoCraftingState __state)
+            static void DoCraftingPostfix(object __instance, Player player, DoCraftingState __state)
             {
                 try
                 {
                     if (__state?.Snapshot == null) return;
-                    var player = Player.m_localPlayer;
                     var station = player.GetCurrentCraftingStation();
                     bool atUpgrader = station != null && station.m_upgrader;
                     if (!atUpgrader) return;
@@ -412,7 +411,7 @@ namespace ReforgedPotential
                     var outcome = UpgradeOutcome.Unknown;
                     var snapshot = __state.Snapshot;
                     if (newItem != null)
-                    {
+                    {                        
                         if (newItem.m_shared.m_name != snapshot.SharedName)
                         {
                             Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade result prefab name mismatch, assume its destroyed (original={snapshot.SharedName}, new={newItem.m_shared.m_name})");
@@ -459,6 +458,16 @@ namespace ReforgedPotential
                         Jotunn.Logger.LogInfo($"DoCraftingPostfix: No item found at grid position ({gridPosX},{gridPosY}) after crafting, assuming destroyed");
                         outcome = UpgradeOutcome.ReturnedIngredients;
                     }
+
+                    if (outcome == UpgradeOutcome.ReturnedIngredients) // && Return value config true
+                    {
+                        var originalResource = originalRequirements.TryGetValue(snapshot.PrefabName, out var resource) ? resource : null;
+                        var totalIdolCost = UpgradeHelper.GetTotalIdolCosts(originalResource, snapshot.OriginalQuality);
+                        foreach (var kvp in totalIdolCost)
+                        {
+                            Jotunn.Logger.LogInfo($"DoCraftingPostfix: Total idol cost for {snapshot.SharedName} at quality {snapshot.OriginalQuality}: {kvp.Key} = {kvp.Value}");
+                        }
+                    }
                     string playerName = player.GetPlayerName();
                     string itemName = __state.Snapshot.SharedName ?? "<unknown item>";
                     itemName = Localization.instance.Localize(itemName);
@@ -482,6 +491,7 @@ namespace ReforgedPotential
                 public string SharedName;
                 public int Variant;
                 public Vector2i GridPos;
+                public string PrefabName;
             }
             private enum UpgradeOutcome { Upgraded, Degraded, Destroyed, ReturnedIngredients, Unchanged, Unknown }
             #endregion
@@ -622,8 +632,6 @@ namespace ReforgedPotential
                                 break;
                             }
                         }
-
-
                         originalRequirements.TryGetValue(selectedRecipe.m_item.name, out var originalResource);
                         Jotunn.Logger.LogDebug($"{LogPrefix}Storing original upgrader resource for {selectedItemData.m_shared.m_name} as {originalResource}");
                     }
@@ -641,89 +649,35 @@ namespace ReforgedPotential
                                 if (originalRequirements.TryGetValue(selectedRecipe.m_item.name, out var resource))
                                 {
                                     Jotunn.Logger.LogDebug($"{LogPrefix}Found upgrader resource for {selectedItemData.m_shared.m_name}: {resource}");
-                                    int configuredMaxBoss = (bossUpgradeValues != null && bossUpgradeValues.Count > 0) ? bossUpgradeValues.Keys.Max() : 8;
                                     var selectedResource = selectedRecipe.m_resources[i];
                                     int qualityLevel = selectedItemData.m_quality;
                                     int baseTier = UpgradeHelper.GetEquipmentTier(resource);
-
                                     int equivTier;
                                     int candidateQuality;
-                                    int candidateMax;
+                                    int configuredMaxBoss = bossUpgradeValues != null && bossUpgradeValues.Count > 0 ? bossUpgradeValues.Keys.Max() : 8;
 
-                                    // BOTH OFF: no idol swap, use base tier & current quality for cost
-                                    if (!EnableBossProgression.Value && !EnableIdolProgression.Value)
+                                    if (baseTier < 0)
                                     {
-                                        
-                                        equivTier = baseTier;
-                                        candidateMax = UpgradeHelper.GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
-                                        candidateQuality = Math.Max(1, Math.Min(candidateMax, qualityLevel));
+                                        Jotunn.Logger.LogWarning(
+                                            $"{LogPrefix}Could not determine equipment tier for resource '{resource}'.");
 
-                                        currentEquivalentTier = equivTier;
-                                        Jotunn.Logger.LogDebug($"{LogPrefix}(BossOff/IdolOff): keeping base resource={resource}, baseTier={baseTier}, quality={qualityLevel}, candidateQuality={candidateQuality}");
-                                    }
-                                    // Boss progression disabled, idol progression enabled:
-                                    // Map every 4 levels, but start from the equipment's base tier
-                                    else if (!EnableBossProgression.Value && EnableIdolProgression.Value)
-                                    {
-                                        
-                                        int tierBlock = Math.Max(0, (qualityLevel - 1) / 4);
-                                        // Desired tier is baseTier + tierBlock
-                                        int desiredTier = baseTier + tierBlock;
-
-                                        // Clamp desiredTier to available configured max boss tier
-                                        int maxAvailableTier = (bossUpgradeValues != null && bossUpgradeValues.Count > 0) ? bossUpgradeValues.Keys.Max() : 8;
-                                        desiredTier = Math.Min(desiredTier, maxAvailableTier);
-
-                                        // Determine how many blocks actually were applied (in case of clamping)
-                                        int actualBlocksUsed = Math.Max(0, desiredTier - baseTier);
-
-                                        equivTier = desiredTier;
-                                        // Within-tier quality (1..4) after subtracting applied blocks
-                                        candidateMax = 4;
-                                        candidateQuality = qualityLevel - (actualBlocksUsed * 4);
-                                        candidateQuality = Math.Max(1, Math.Min(candidateMax, candidateQuality));
-
-                                        currentEquivalentTier = equivTier;
-                                        Jotunn.Logger.LogDebug($"{LogPrefix}(BossOff/IdolOn): baseTier={baseTier}, quality={qualityLevel}, tierBlock={tierBlock}, desiredTier={desiredTier}, actualBlocksUsed={actualBlocksUsed}, mappedTier={equivTier}, candidateQuality={candidateQuality}");
-                                    }
-                                    // Boss progression enabled, idol progression disabled:
-                                    // Keep original resource prefab (no idol swap), compute cost from base tier & quality
-                                    else if (EnableBossProgression.Value && !EnableIdolProgression.Value)
-                                    {
-                                        
-                                        equivTier = baseTier;
-                                        int maxForBase = UpgradeHelper.GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
-                                        candidateMax = Math.Max(1, maxForBase);
-                                        candidateQuality = Math.Max(1, Math.Min(candidateMax, qualityLevel));
-
-                                        currentEquivalentTier = equivTier;
-                                        Jotunn.Logger.LogDebug($"{LogPrefix}(BossOn/IdolOff): keeping base resource={resource}, baseTier={baseTier}, quality={qualityLevel}, candidateQuality={candidateQuality}");
-                                    }
-                                    else
-                                    {
-                                        // Default behaviorboth on: compute equivalent tier as before
-                                        equivTier = UpgradeHelper.GetEquivalentTier(baseTier, qualityLevel, configuredMaxBoss);
-                                        currentEquivalentTier = equivTier;
-                                        int baseMax = UpgradeHelper.GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
-                                        candidateMax = UpgradeHelper.GetMaxUpgradeLevel(equivTier, configuredMaxBoss);
-                                        int distanceFromMax = baseMax - qualityLevel;
-                                        candidateQuality = candidateMax - distanceFromMax;
-                                        candidateQuality = Math.Max(1, Math.Min(candidateMax, candidateQuality));
-
-                                        Jotunn.Logger.LogDebug($"{LogPrefix}(Default): Base tier {baseTier}, quality {qualityLevel}, equivalent tier {equivTier}, candidateQuality {candidateQuality}.");
+                                        continue;
                                     }
 
-                                    // compute cost using per tier level (candidateQuality)
-                                    int level = Math.Max(0, candidateQuality - 1);
-                                    int costStartLevel = Math.Max(1, CostScalingLevelStart.Value);
-                                    int cost = CostStart.Value;
-                                    if (CostIncreaseInterval.Value > 0 && level >= costStartLevel)
-                                    {
-                                        cost += ((level - costStartLevel)
-                                            / CostIncreaseInterval.Value + 1)
-                                            * CostIncreasePerInterval.Value;
-                                    }
+                                    UpgradeHelper.GetEquivalentUpgradeValues(baseTier, qualityLevel, configuredMaxBoss, out equivTier, out candidateQuality);
 
+                                    currentEquivalentTier = equivTier;
+
+                                    int cost = UpgradeHelper.GetUpgradeCost(candidateQuality);
+
+                                    Jotunn.Logger.LogDebug(
+                                        $"{LogPrefix}Resource={resource}, " +
+                                        $"baseTier={baseTier}, " +
+                                        $"quality={qualityLevel}, " +
+                                        $"equivalentTier={equivTier}, " +
+                                        $"candidateQuality={candidateQuality}, " +
+                                        $"cost={cost}.");
+                                    selectedItemData.m_shared.m_breakReturnIngreientsAmount = 1;
                                     // Apply resource prefab & amount:
                                     if ((!EnableIdolProgression.Value))
                                     {
@@ -752,7 +706,7 @@ namespace ReforgedPotential
                                                 Jotunn.Logger.LogInfo($"{LogPrefix}Found prefab for Upgrader{equivTier}Weapon. Setting resource to {itemDrop.name} with amount {cost}.");
                                                 selectedResource.m_resItem = itemDrop;   
                                                 selectedResource.m_resItem.m_itemData.m_shared.m_upgradeChance = UpgradeChance.Value;
-                                                selectedResource.m_resItem.m_itemData.m_shared.m_breakChance = BreakChance.Value;
+                                                selectedResource.m_resItem.m_itemData.m_shared.m_breakChance = BreakChance.Value;           
                                                 selectedResource.m_amount = cost;
                                             }
                                         }
@@ -788,6 +742,8 @@ namespace ReforgedPotential
             }
             #endregion
         }
+
+
         private void AddConfigurableRecipes()
         {
             try
