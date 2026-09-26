@@ -1,11 +1,13 @@
 ﻿using BepInEx;
 using BepInEx.Configuration;
 using HarmonyLib;
+using Ionic.Zlib;
 using Jotunn.Configs;
 using Jotunn.Entities;
 using Jotunn.Extensions;
 using Jotunn.Managers;
 using Jotunn.Utils;
+using ReforgedPotential.Compatibility;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -18,7 +20,6 @@ using static ClutterSystem;
 using static ItemDrop;
 using static Version;
 using Logger = Jotunn.Logger;
-using ReforgedPotential.Compatibility;
 namespace ReforgedPotential
 {
     [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
@@ -30,7 +31,7 @@ namespace ReforgedPotential
         public const string PluginName = "Reforged Potential";
         public const string PluginVersion = "2.0.5";
 
-        
+
         private readonly Harmony harmony = new Harmony(PluginGUID);
 
         #region Config Entries
@@ -117,17 +118,18 @@ namespace ReforgedPotential
 
             SynchronizationManager.OnConfigurationSynchronized += (obj, attr) =>
             {
+                LoadConfig();
+                SyncRecipes();
                 if (attr.InitialSynchronization)
                 {
                     Jotunn.Logger.LogMessage("Initial Config sync event received");
                 }
                 else
                 {
-                    LoadConfig();
                     Jotunn.Logger.LogMessage("Config synced from server");
                 }
             };
-
+            PrefabManager.OnVanillaPrefabsAvailable += AddConfigurableRecipes;
             harmony.PatchAll();
         }
 
@@ -200,6 +202,8 @@ namespace ReforgedPotential
             // Subscribe to the event that fires whenever the config is reloaded.
             configFileWatcher.OnConfigFileReloaded += () =>
             {
+                LoadConfig();
+                SyncRecipes();
                 if (!(ZNet.instance == null) && ZNet.instance.IsServer())
                 {
                     Logger.LogInfo("Configuration file has been changed, reloading settings.");
@@ -216,13 +220,13 @@ namespace ReforgedPotential
             var isAdminOnly = EnableServerSync.Value;
             //-------------
             #region Global Notifications
-            EnableGlobalUpgradeNotifications = Config.BindConfig("Global Notifications","Enable Global Upgrade Notifications",false, 
+            EnableGlobalUpgradeNotifications = Config.BindConfig("Global Notifications", "Enable Global Upgrade Notifications", false,
                 "Broadcast a message to all online players when someone attempts an upgrade.", isAdminOnly, 3);
 
-            SuccessMessage = Config.BindConfig("Global Notifications","Success Message","{PlayerName} successfully upgraded {ItemName} to level {Level}.",
+            SuccessMessage = Config.BindConfig("Global Notifications", "Success Message", "{PlayerName} successfully upgraded {ItemName} to level {Level}.",
                 "Message shown on successful upgrade. Supports {PlayerName}, {ItemName}, {Level}.", isAdminOnly, 2);
 
-            FailedMessage = Config.BindConfig("Global Notifications","Failed Message","{PlayerName} tried to upgrade {ItemName} to level {Level}, but failed.",
+            FailedMessage = Config.BindConfig("Global Notifications", "Failed Message", "{PlayerName} tried to upgrade {ItemName} to level {Level}, but failed.",
                 "Message shown on failed upgrade. Supports {PlayerName}, {ItemName}, {Level}.", isAdminOnly, 1);
             #endregion
             //----------------
@@ -244,7 +248,7 @@ namespace ReforgedPotential
             CostIncreasePerInterval = Config.BindConfig("Upgrade Settings", "Cost Increase Per Interval", 1,
                 "Additional ingredient cost each time the cost scaling interval is reached starting at CostScalingLevelStart. (Starting at level X, the upgrade cost increases by this amount every Y levels. For example, with an increase of 1 every 2 levels starting at level 6: levels 1–5 cost 1, levels 6–7 cost 2, levels 8–9 cost 3, and so on.)",
                 isAdminOnly, 16, intRange);
-            
+
             CostIncreaseInterval = Config.BindConfig("Upgrade Settings", "Cost Increase Interval", 1,
                 "Number of levels between each cost increase. Set to 0 to disable cost scaling.", isAdminOnly, 15, intRange);
 
@@ -277,21 +281,21 @@ namespace ReforgedPotential
                 "If true, upgrades are limited by boss progression. Defeat bosses to unlock higher upgrade levels.", isAdminOnly, 10);
             BaseUpgradeLimit = Config.BindConfig("Boss Progression", "Base Upgrade Limit", 5,
                 "Base upgrade limit for all items before any additional calculations are made", isAdminOnly, 9);
-            Boss1MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 1 Max Upgrade Level", 4, 
+            Boss1MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 1 Max Upgrade Level", 4,
                 "Additional max upgrade level unlocked for wooden tier after defeating Eikthyr.", isAdminOnly, 8);
-            Boss2MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 2 Max Upgrade Level", 4, 
+            Boss2MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 2 Max Upgrade Level", 4,
                 "Additional max upgrade level unlocked for bronze tier and below after defeating Elder.", isAdminOnly, 8);
-            Boss3MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 3 Max Upgrade Level", 4, 
+            Boss3MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 3 Max Upgrade Level", 4,
                 "Additional max upgrade level unlocked for iron tier and below after defeating Bonemass.", isAdminOnly, 7);
-            Boss4MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 4 Max Upgrade Level", 4, 
+            Boss4MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 4 Max Upgrade Level", 4,
                 "Additional max upgrade level unlocked for silver tier and below after defeating Moder.", isAdminOnly, 6);
-            Boss5MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 5 Max Upgrade Level", 4, 
+            Boss5MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 5 Max Upgrade Level", 4,
                 "Additional max upgrade level unlocked for black metal tier and below after defeating Yagluth.", isAdminOnly, 5);
-            Boss6MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 6 Max Upgrade Level", 4, 
+            Boss6MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 6 Max Upgrade Level", 4,
                 "Additional max upgrade level unlocked for black marble tier and below after defeating Queen.", isAdminOnly, 4);
-            Boss7MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 7 Max Upgrade Level", 4, 
+            Boss7MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 7 Max Upgrade Level", 4,
                 "Additional max upgrade level unlocked for flametal tier and below after defeating Fader.", isAdminOnly, 3);
-            Boss8MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 8 Max Upgrade Level", 100, 
+            Boss8MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 8 Max Upgrade Level", 100,
                 "Additional max upgrade level unlocked for bloodgold tier and below after defeating Kall Fimbulbringer.", isAdminOnly, 2);
             bossUpgradeValues = new Dictionary<int, int>()
             {
@@ -385,9 +389,6 @@ namespace ReforgedPotential
 
             EnableDebugLogging = Config.BindConfig("Logging", "Enable Debug Logging", false,
                 "Show debug logging", false);
-
-            AddConfigurableRecipes();
-
         }
         #endregion
 
@@ -415,9 +416,9 @@ namespace ReforgedPotential
                     int craftedItemAmount = __instance.m_craftRecipe.GetAmount(craftQuality, out requiredResourceAmount, out singleIngredient, craftMultiplier);
                     string upgradeItemName = __instance.m_craftUpgradeItem.m_shared.m_name;
                     bool hasCraftUpgradeItem = __instance.m_craftUpgradeItem == null || player.GetInventory().ContainsItem(__instance.m_craftUpgradeItem);
-                    bool hasRequiredSingleIngredient =!__instance.m_craftRecipe.m_requireOnlyOneIngredient || singleIngredient != null;
+                    bool hasRequiredSingleIngredient = !__instance.m_craftRecipe.m_requireOnlyOneIngredient || singleIngredient != null;
                     bool hasNoCraftCost = player.NoCostCheat() || ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoCraftCost);
-                    bool canAddCraftedItem =   __instance.m_craftUpgradeItem != null ||  player.GetInventory().CanAddItem(__instance.m_craftRecipe.m_item.gameObject, 1);
+                    bool canAddCraftedItem = __instance.m_craftUpgradeItem != null || player.GetInventory().CanAddItem(__instance.m_craftRecipe.m_item.gameObject, 1);
                     var sharedName = __instance.m_craftUpgradeItem.m_shared.m_name ?? "Unknown Item";
                     if (!canAddCraftedItem)
                     {
@@ -566,15 +567,15 @@ namespace ReforgedPotential
                     else
                     {
                         var failureCraftQuality = Mathf.Max(1, craftQuality - 2);
-                        ZLog.Log( $"Upgrader <color=orange>FAILED</color> " + $"{__instance.m_craftUpgradeItem.m_shared.m_name} level " + $"{craftQuality - 1}, level was reduced!");
+                        ZLog.Log($"Upgrader <color=orange>FAILED</color> " + $"{__instance.m_craftUpgradeItem.m_shared.m_name} level " + $"{craftQuality - 1}, level was reduced!");
                         var failureMessage = "Upgrade failed!";
                         if (ConsumeIdolsOnlyOnFailure.Value)
-                        {                            
+                        {
                             failureCraftQuality = __instance.m_craftUpgradeItem.m_quality;
                             if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {sharedName}, level was not reduced due to 'Consume Idols Only On Failure' = True");
                         }
                         else
-                        {                            
+                        {
                             if (originalQuality == 1)
                             {
                                 if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {sharedName}, cannot change below level 1.");
@@ -615,16 +616,16 @@ namespace ReforgedPotential
                     {
                         if (upgradeSucceeded)
                         {
-                            currentCraftingStation.m_craftItemDoneEffects.Create(player.transform.position,UnityEngine.Quaternion.identity);
+                            currentCraftingStation.m_craftItemDoneEffects.Create(player.transform.position, UnityEngine.Quaternion.identity);
                         }
                         else
                         {
-                            currentCraftingStation.m_craftItemDoneFailEffects.Create(player.transform.position,UnityEngine.Quaternion.identity);
+                            currentCraftingStation.m_craftItemDoneFailEffects.Create(player.transform.position, UnityEngine.Quaternion.identity);
                         }
                     }
                     else
                     {
-                        __instance.m_craftItemDoneEffects.Create(player.transform.position,UnityEngine.Quaternion.identity);
+                        __instance.m_craftItemDoneEffects.Create(player.transform.position, UnityEngine.Quaternion.identity);
                     }
                     var itemName = Localization.instance.Localize(upgradeItemName);
 
@@ -636,9 +637,9 @@ namespace ReforgedPotential
                     }
                     bool success = outcome == UpgradeOutcome.Upgraded;
                     BroadcastUpgradeResult(playerName, itemName, targetLevel, success);
-                    Gogan.LogEvent("Game","Crafted", __instance.m_craftRecipe.m_item.m_itemData.m_shared.m_name, craftQuality);
+                    Gogan.LogEvent("Game", "Crafted", __instance.m_craftRecipe.m_item.m_itemData.m_shared.m_name, craftQuality);
                     return false;
-                
+
                 }
                 catch (Exception ex)
                 {
@@ -706,7 +707,7 @@ namespace ReforgedPotential
 
                             if (itemQuality >= maxUpgradeLevel)
                             {
-                                int requiredBoss = UpgradeHelper.GetRequiredBossForNextUpgrade(itemTier,itemQuality);
+                                int requiredBoss = UpgradeHelper.GetRequiredBossForNextUpgrade(itemTier, itemQuality);
                                 string requiredBossName =
                                     requiredBoss != -1 &&
                                     bossNames.TryGetValue(requiredBoss, out string bossName)
@@ -723,7 +724,7 @@ namespace ReforgedPotential
 
                                 player?.Message(
                                     MessageHud.MessageType.Center,
-                                    requiredBossName != null ? $"Defeat {requiredBossName} to upgrade this weapon further.": "Max upgrade level reached!");
+                                    requiredBossName != null ? $"Defeat {requiredBossName} to upgrade this weapon further." : "Max upgrade level reached!");
                                 return false;
                             }
                             return true;
@@ -764,7 +765,7 @@ namespace ReforgedPotential
                     {
                         foreach (var req in selectedRecipe.m_resources ?? Array.Empty<Piece.Requirement>())
                         {
-                            if(req.m_upgraderResource)
+                            if (req.m_upgraderResource)
                             {
                                 var originalRequirement = req.m_resItem.name;
                                 originalRequirements.Add(selectedRecipe.m_item.name, originalRequirement);
@@ -846,7 +847,7 @@ namespace ReforgedPotential
 
                                         if (prefabName == null)
                                         {
-                                            Jotunn.Logger.LogError( $"{LogPrefix}Selected resource is neither weapon nor armor. Setting cost to {cost}.");
+                                            Jotunn.Logger.LogError($"{LogPrefix}Selected resource is neither weapon nor armor. Setting cost to {cost}.");
                                         }
                                         else
                                         {
@@ -889,12 +890,6 @@ namespace ReforgedPotential
         {
             try
             {
-                if (EnableRecipes == null || !EnableRecipes.Value)
-                {
-                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Configurable recipes are disabled; skipping AddConfigurableRecipes.");
-                    return;
-                }
-
                 var targets = new (string Prefab, ConfigEntry<string> Config)[]
                 {
                         ("Upgrader0Armor", Recipe_Upgrader0Armor),
@@ -928,6 +923,7 @@ namespace ReforgedPotential
                     var craftingStationId = string.IsNullOrEmpty(Station_Global.Value.Trim().Trim('$')) ? null : Station_Global.Value.Trim().Trim('$');
                     var recipeConfig = new RecipeConfig
                     {
+                        Name = $"RFG_{prefabName}",
                         Item = prefabName,
                         CraftingStation = craftingStationId,
                         Enabled = true,
@@ -976,6 +972,88 @@ namespace ReforgedPotential
             catch (Exception ex)
             {
                 Jotunn.Logger.LogError($"AddConfigurableRecipes exception: {ex}");
+            }
+        }
+
+        private void SyncRecipes()
+        {
+            try
+            {
+                var targets = new (string Prefab, ConfigEntry<string> Config)[]
+                {
+                        ("Upgrader0Armor", Recipe_Upgrader0Armor),
+                        ("Upgrader0Weapon", Recipe_Upgrader0Weapon),
+                        ("Upgrader1Armor", Recipe_Upgrader1Armor),
+                        ("Upgrader1Weapon", Recipe_Upgrader1Weapon),
+                        ("Upgrader2Armor", Recipe_Upgrader2Armor),
+                        ("Upgrader2Weapon", Recipe_Upgrader2Weapon),
+                        ("Upgrader3Armor", Recipe_Upgrader3Armor),
+                        ("Upgrader3Weapon", Recipe_Upgrader3Weapon),
+                        ("Upgrader4Armor", Recipe_Upgrader4Armor),
+                        ("Upgrader4Weapon", Recipe_Upgrader4Weapon),
+                        ("Upgrader5Armor", Recipe_Upgrader5Armor),
+                        ("Upgrader5Weapon", Recipe_Upgrader5Weapon),
+                        ("Upgrader6Armor", Recipe_Upgrader6Armor),
+                        ("Upgrader6Weapon", Recipe_Upgrader6Weapon),
+                        ("Upgrader7Armor", Recipe_Upgrader7Armor),
+                        ("Upgrader7Weapon", Recipe_Upgrader7Weapon)
+                };
+
+                foreach (var (prefabName, cfgEntry) in targets)
+                {
+                    string cfgValue = cfgEntry?.Value?.Trim();
+                    if (string.IsNullOrEmpty(cfgValue))
+                    {
+                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"SyncRecipes: '{prefabName}' configuration is empty, skipping.");
+                        continue;
+                    }
+
+                    var craftingStationId = string.IsNullOrEmpty(Station_Global.Value.Trim().Trim('$')) ? "" : Station_Global.Value.Trim().Trim('$');
+                    var craftingStation = PrefabManager.Instance.GetPrefab(craftingStationId);
+                    var recipe = ItemManager.Instance.GetRecipe($"RFG_{prefabName}").Recipe;
+                    recipe.m_item = PrefabManager.Instance.GetPrefab(prefabName).GetComponent<ItemDrop>();
+                    recipe.m_craftingStation = craftingStation?.GetComponent<CraftingStation>();
+                    recipe.m_enabled = EnableRecipes.Value;
+
+                    var requirements = new List<Piece.Requirement>();
+                    bool anyRequirement = false;
+                    var tokens = cfgValue.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+                    foreach (var raw in tokens)
+                    {
+                        var token = raw.Trim();
+                        if (string.IsNullOrEmpty(token)) continue;
+
+                        var parts = token.Split(new[] { ':' }, StringSplitOptions.RemoveEmptyEntries);
+                        if (parts.Length != 2)
+                        {
+                            Jotunn.Logger.LogWarning($"SyncRecipes: invalid token '{token}' for '{prefabName}'. Use 'PrefabName:Amount'.");
+                            continue;
+                        }
+
+                        string reqName = parts[0].Trim();
+                        if (!int.TryParse(parts[1].Trim(), out int reqAmount) || reqAmount <= 0)
+                        {
+                            Jotunn.Logger.LogWarning($"SyncRecipes: invalid amount in token '{token}' for '{prefabName}'. Must be positive integer.");
+                            continue;
+                        }
+
+                        requirements.Add(new Piece.Requirement { m_resItem = PrefabManager.Instance.GetPrefab(reqName)?.GetComponent<ItemDrop>(), m_amount = reqAmount });
+                        anyRequirement = true;
+                    }
+
+                    if (!anyRequirement)
+                    {
+                        Jotunn.Logger.LogWarning($"SyncRecipes: no valid ingredients for '{prefabName}' from '{cfgValue}'; skipping.");
+                        continue;
+                    }
+
+                    recipe.m_resources = requirements.ToArray();
+                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"SyncRecipes: updated recipe for '{prefabName}' (requirements: {cfgValue}).");
+                }
+            }
+            catch (Exception ex)
+            {
+                Jotunn.Logger.LogError($"SyncRecipes exception: {ex}");
             }
         }
     }
