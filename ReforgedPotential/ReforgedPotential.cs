@@ -3,6 +3,7 @@ using BepInEx.Configuration;
 using HarmonyLib;
 using Jotunn.Configs;
 using Jotunn.Entities;
+using Jotunn.Extensions;
 using Jotunn.Managers;
 using Jotunn.Utils;
 using System;
@@ -111,8 +112,22 @@ namespace ReforgedPotential
         private void Awake()
         {
             RPC_Reforged = NetworkManager.Instance.AddRPC("RPC_Reforged", RPC_ReforgedServerReceive, RPC_ReforgedClientReceive);
-            InitConfig();
+            LoadConfig();
             CreateConfigWatcher();
+
+            SynchronizationManager.OnConfigurationSynchronized += (obj, attr) =>
+            {
+                if (attr.InitialSynchronization)
+                {
+                    Jotunn.Logger.LogMessage("Initial Config sync event received");
+                }
+                else
+                {
+                    LoadConfig();
+                    Jotunn.Logger.LogMessage("Config synced from server");
+                }
+            };
+
             harmony.PatchAll();
         }
 
@@ -185,79 +200,99 @@ namespace ReforgedPotential
             // Subscribe to the event that fires whenever the config is reloaded.
             configFileWatcher.OnConfigFileReloaded += () =>
             {
-                Jotunn.Logger.LogInfo("Config file reloaded, reinitializing config values.");
-                InitConfig();
+                if (!(ZNet.instance == null) && ZNet.instance.IsServer())
+                {
+                    Logger.LogInfo("Configuration file has been changed, reloading settings.");
+                    LoadConfig();
+                    return;
+                }
+                Jotunn.Logger.LogWarning("Configuration file has been changed, ignoring changes if not the server.");
             };
         }
-        private void InitConfig()
+        private void LoadConfig()
         {
             Config.SaveOnConfigSet = true;
-            ConfigurationManagerAttributes isAdminOnly = new ConfigurationManagerAttributes { IsAdminOnly = true };
-            EnableServerSync = Config.Bind("Server Only", "01. Enable Server Sync", true, new ConfigDescription("If true, config values are synchronized from server to clients.", null, isAdminOnly));
-            isAdminOnly = new ConfigurationManagerAttributes { IsAdminOnly = EnableServerSync.Value };
+            EnableServerSync = Config.BindConfig("Server Only", "Enable Server Sync", true, "If true, config values are synchronized from server to clients.", synced: true);
+            var isAdminOnly = EnableServerSync.Value;
             //-------------
             #region Global Notifications
-            EnableGlobalUpgradeNotifications = Config.Bind("Global Notifications","01. Enable Global Upgrade Notifications",false,
-                new ConfigDescription("Broadcast a message to all online players when someone attempts an upgrade.", null, isAdminOnly));
+            EnableGlobalUpgradeNotifications = Config.BindConfig("Global Notifications","Enable Global Upgrade Notifications",false, 
+                "Broadcast a message to all online players when someone attempts an upgrade.", isAdminOnly, 3);
 
-            SuccessMessage = Config.Bind("Global Notifications","02. Success Message","{PlayerName} successfully upgraded {ItemName} to level {Level}.",
-                new ConfigDescription("Message shown on successful upgrade. Supports {PlayerName}, {ItemName}, {Level}.", null, isAdminOnly));
+            SuccessMessage = Config.BindConfig("Global Notifications","Success Message","{PlayerName} successfully upgraded {ItemName} to level {Level}.",
+                "Message shown on successful upgrade. Supports {PlayerName}, {ItemName}, {Level}.", isAdminOnly, 2);
 
-            FailedMessage = Config.Bind("Global Notifications","03. Failed Message","{PlayerName} tried to upgrade {ItemName} to level {Level}, but failed.",
-                new ConfigDescription("Message shown on failed upgrade. Supports {PlayerName}, {ItemName}, {Level}.", null, isAdminOnly));
+            FailedMessage = Config.BindConfig("Global Notifications","Failed Message","{PlayerName} tried to upgrade {ItemName} to level {Level}, but failed.",
+                "Message shown on failed upgrade. Supports {PlayerName}, {ItemName}, {Level}.", isAdminOnly, 1);
             #endregion
             //----------------
             #region Upgrade Settings
             AcceptableValueRange<float> floatRange = new AcceptableValueRange<float>(0, 1);
-            UpgradeChance = Config.Bind("Upgrade Settings", "01. Upgrade Chance", 1f,
-                new ConfigDescription("Chance for an upgrade to succeed.", floatRange, isAdminOnly));
-            BreakChance = Config.Bind("Upgrade Settings", "02. Break Chance", 0f,
-                new ConfigDescription("When an upgrade fails, this is the chance for it to break (Ex. 1 = Item will always break on upgrade failure, 0 = Item will just degrade 1 level on upgrade failure)", floatRange, isAdminOnly));
-            ConsumeIdolsOnlyOnFailure = Config.Bind("Upgrade Settings", "03. Consume Idols Only On Failure", false,
-                new ConfigDescription("If true, idols are just consumed and the item doesn't lose a level (Breaking still removes the item)", null, isAdminOnly));
+            UpgradeChance = Config.BindConfig("Upgrade Settings", "Upgrade Chance", 1f,
+                "Chance for an upgrade to succeed.", isAdminOnly, 20, floatRange);
+            BreakChance = Config.BindConfig("Upgrade Settings", "Break Chance", 0f,
+                "When an upgrade fails, this is the chance for it to break (Ex. 1 = Item will always break on upgrade failure, 0 = Item will just degrade 1 level on upgrade failure)",
+                isAdminOnly, 19, floatRange);
+            ConsumeIdolsOnlyOnFailure = Config.BindConfig("Upgrade Settings", "Consume Idols Only On Failure", false,
+                "If true, idols are just consumed and the item doesn't lose a level (Breaking still removes the item)", isAdminOnly, 18);
 
             AcceptableValueRange<int> intRange = new AcceptableValueRange<int>(0, 1000);
 
-            CostStart = Config.Bind("Upgrade Settings", "04. Cost Start", 1, new ConfigDescription("Base idol cost for upgrades. (Game Default is 1)", intRange, isAdminOnly));
-            CostIncreasePerInterval = Config.Bind("Upgrade Settings", "05. Cost Increase Per Interval", 1,
-                new ConfigDescription("Additional ingredient cost each time the cost scaling interval is reached starting at CostScalingLevelStart. (Starting at level X, the upgrade cost increases by this amount every Y levels. For example, with an increase of 1 every 2 levels starting at level 6: levels 1–5 cost 1, levels 6–7 cost 2, levels 8–9 cost 3, and so on.)", null, isAdminOnly));
-            CostIncreaseInterval = Config.Bind("Upgrade Settings", "06. Cost Increase Interval", 1,
-                new ConfigDescription("Number of levels between each cost increase. Set to 0 to disable cost scaling.", intRange, isAdminOnly));
-            CostScalingLevelStart = Config.Bind("Upgrade Settings", "07. Cost Scaling Level Start", 1,
-                new ConfigDescription("Level after at which cost scaling starts.", intRange, isAdminOnly));            
-            UpgradeBaseDuration = Config.Bind("Upgrade Settings", "08. Upgrade Base Duration", 2f,
-                new ConfigDescription("Base crafting duration for upgrading. This is the base time it takes to upgrade an equipment (Game Default is 8)", null, isAdminOnly));
-            UpgradeDurationIncreasePerLevel = Config.Bind("Upgrade Settings", "09. Upgrade Duration Increase Per Level", 1f,
-                new ConfigDescription("Additional crafting duration per item level. This is the additional time added per item level to the total crafting time. (Game Default is 1)", null, isAdminOnly));
-            RefundIdolsOnBreak = Config.Bind("Upgrade Settings", "10. Refund Idols On Break", false,
-                new ConfigDescription("If true, a percentage of the idols used are refunded when an equipment breaks", null, isAdminOnly));
-            RefundIdolsOnBreakStartingLevel = Config.Bind("Upgrade Settings", "11. Refund Idols On Break Starting Level", 5,
-                new ConfigDescription("Calculation of the refunded idols starts at this level. (Ex. at value 5: Levels 1-4 are not included for the idol refund calculations", intRange, isAdminOnly));
-            RefundIdolsPercentageOnBreak = Config.Bind("Upgrade Settings", "12. Refund Idols Percentage On Break", 0.3f,
-                new ConfigDescription("Percentage of idols refunded when an equipment breaks.", floatRange, isAdminOnly));
+            CostStart = Config.BindConfig("Upgrade Settings", "Cost Start", 1,
+                "Base idol cost for upgrades. (Game Default is 1)", isAdminOnly, 17, intRange);
+
+            CostIncreasePerInterval = Config.BindConfig("Upgrade Settings", "Cost Increase Per Interval", 1,
+                "Additional ingredient cost each time the cost scaling interval is reached starting at CostScalingLevelStart. (Starting at level X, the upgrade cost increases by this amount every Y levels. For example, with an increase of 1 every 2 levels starting at level 6: levels 1–5 cost 1, levels 6–7 cost 2, levels 8–9 cost 3, and so on.)",
+                isAdminOnly, 16, intRange);
+            
+            CostIncreaseInterval = Config.BindConfig("Upgrade Settings", "Cost Increase Interval", 1,
+                "Number of levels between each cost increase. Set to 0 to disable cost scaling.", isAdminOnly, 15, intRange);
+
+            CostScalingLevelStart = Config.BindConfig("Upgrade Settings", "Cost Scaling Level Start", 1,
+                "Level after at which cost scaling starts.", isAdminOnly, 14, intRange);
+
+            floatRange = new AcceptableValueRange<float>(0, 100);
+            UpgradeBaseDuration = Config.BindConfig("Upgrade Settings", "Upgrade Crafting Time Base Duration", 2f,
+                "Base crafting duration for upgrading. This is the base time it takes to upgrade an equipment (Game Default is 8)", isAdminOnly, 13, floatRange);
+
+            UpgradeDurationIncreasePerLevel = Config.BindConfig("Upgrade Settings", "Upgrade Crafting Time Duration Increase Per Level", 1f,
+                "Additional crafting duration per item level. This is the additional time added per item level to the total crafting time. (Game Default is 1)",
+                isAdminOnly, 12, floatRange);
+
+            RefundIdolsOnBreak = Config.BindConfig("Upgrade Settings", "Refund Idols On Break", false,
+                "If true, a percentage of the idols used are refunded when an equipment breaks", isAdminOnly, 11);
+
+            RefundIdolsOnBreakStartingLevel = Config.BindConfig("Upgrade Settings", "Refund Idols On Break Starting Level", 5,
+                "Calculation of the refunded idols starts at this level. (Ex. at value 5: Levels 1-4 are not included for the idol refund calculations",
+                isAdminOnly, 10, intRange);
+
+            floatRange = new AcceptableValueRange<float>(0, 1);
+            RefundIdolsPercentageOnBreak = Config.BindConfig("Upgrade Settings", "Refund Idols Percentage On Break", 0.3f,
+                "Percentage of idols refunded when an equipment breaks.", isAdminOnly, 9, floatRange);
+
             #endregion
             //--------------
             #region Boss Progression
-            EnableBossProgression = Config.Bind("Boss Progression", "01. Enable Boss Progression", true,
-                new ConfigDescription("If true, upgrades are limited by boss progression. Defeat bosses to unlock higher upgrade levels.", null, isAdminOnly));
-            BaseUpgradeLimit = Config.Bind("Boss Progression", "02. Base Upgrade Limit", 5,
-                new ConfigDescription("Base upgrade limit for all items before any additional calculations are made", null, isAdminOnly));
-            Boss1MaxUpgradeLevel = Config.Bind("Boss Progression", "03. Boss 1 Max Upgrade Level", 4, 
-                new ConfigDescription("Additional max upgrade level unlocked for wooden tier after defeating Eikthyr.", null, isAdminOnly));
-            Boss2MaxUpgradeLevel = Config.Bind("Boss Progression", "04. Boss 2 Max Upgrade Level", 4, 
-                new ConfigDescription("Additional max upgrade level unlocked for bronze tier and below after defeating Elder.", null, isAdminOnly));
-            Boss3MaxUpgradeLevel = Config.Bind("Boss Progression", "05. Boss 3 Max Upgrade Level", 4, 
-                new ConfigDescription("Additional max upgrade level unlocked for iron tier and below after defeating Bonemass.", null, isAdminOnly));
-            Boss4MaxUpgradeLevel = Config.Bind("Boss Progression", "06. Boss 4 Max Upgrade Level", 4, 
-                new ConfigDescription("Additional max upgrade level unlocked for silver tier and below after defeating Moder.", null, isAdminOnly));
-            Boss5MaxUpgradeLevel = Config.Bind("Boss Progression", "07. Boss 5 Max Upgrade Level", 4, 
-                new ConfigDescription("Additional max upgrade level unlocked for black metal tier and below after defeating Yagluth.", null, isAdminOnly));
-            Boss6MaxUpgradeLevel = Config.Bind("Boss Progression", "08. Boss 6 Max Upgrade Level", 4, 
-                new ConfigDescription("Additional max upgrade level unlocked for black marble tier and below after defeating Queen.", null, isAdminOnly));
-            Boss7MaxUpgradeLevel = Config.Bind("Boss Progression", "09. Boss 7 Max Upgrade Level", 4, 
-                new ConfigDescription("Additional max upgrade level unlocked for flametal tier and below after defeating Fader.", null, isAdminOnly));
-            Boss8MaxUpgradeLevel = Config.Bind("Boss Progression", "10. Boss 8 Max Upgrade Level", 100, 
-                new ConfigDescription("Additional max upgrade level unlocked for bloodgold tier and below after defeating Kall Fimbulbringer.", null, isAdminOnly));
+            EnableBossProgression = Config.BindConfig("Boss Progression", "Enable Boss Progression", true,
+                "If true, upgrades are limited by boss progression. Defeat bosses to unlock higher upgrade levels.", isAdminOnly, 10);
+            BaseUpgradeLimit = Config.BindConfig("Boss Progression", "Base Upgrade Limit", 5,
+                "Base upgrade limit for all items before any additional calculations are made", isAdminOnly, 9);
+            Boss1MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 1 Max Upgrade Level", 4, 
+                "Additional max upgrade level unlocked for wooden tier after defeating Eikthyr.", isAdminOnly, 8);
+            Boss2MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 2 Max Upgrade Level", 4, 
+                "Additional max upgrade level unlocked for bronze tier and below after defeating Elder.", isAdminOnly, 8);
+            Boss3MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 3 Max Upgrade Level", 4, 
+                "Additional max upgrade level unlocked for iron tier and below after defeating Bonemass.", isAdminOnly, 7);
+            Boss4MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 4 Max Upgrade Level", 4, 
+                "Additional max upgrade level unlocked for silver tier and below after defeating Moder.", isAdminOnly, 6);
+            Boss5MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 5 Max Upgrade Level", 4, 
+                "Additional max upgrade level unlocked for black metal tier and below after defeating Yagluth.", isAdminOnly, 5);
+            Boss6MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 6 Max Upgrade Level", 4, 
+                "Additional max upgrade level unlocked for black marble tier and below after defeating Queen.", isAdminOnly, 4);
+            Boss7MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 7 Max Upgrade Level", 4, 
+                "Additional max upgrade level unlocked for flametal tier and below after defeating Fader.", isAdminOnly, 3);
+            Boss8MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 8 Max Upgrade Level", 100, 
+                "Additional max upgrade level unlocked for bloodgold tier and below after defeating Kall Fimbulbringer.", isAdminOnly, 2);
             bossUpgradeValues = new Dictionary<int, int>()
             {
                 { 0, 0 }, // No boss defeated
@@ -273,75 +308,83 @@ namespace ReforgedPotential
             #endregion
             //--------------
             #region Idol Progression
-            EnableIdolProgression = Config.Bind("Idol Progression", "01. Enable Idol Progression", true,
-                new ConfigDescription("If true, the required idol to upgrade an equipment will change to match it's current equivalent item tier and level (If boss progression is off, tiers will change every 4 levels)", null, isAdminOnly));
+            EnableIdolProgression = Config.BindConfig("Idol Progression", "Enable Idol Progression", true,
+                "If true, the required idol to upgrade an equipment will change to match it's current equivalent item tier and level (If boss progression is off, tiers will change every 4 levels)",
+                isAdminOnly);
             #endregion
             //--------------
-            Station_Global = Config.Bind("Crafting Station", "01. Global Station", "piece_artisanstation",
-                new ConfigDescription("Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. 'piece_workbench'). Empty = craftable by hand.", null, isAdminOnly));
+            Station_Global = Config.BindConfig("Crafting Station", "Global Station", "piece_artisanstation",
+               "Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. 'piece_workbench'). Empty = craftable by hand.", isAdminOnly);
             //--------------
             #region Recipes
-            EnableRecipes = Config.Bind("Recipes", "01. Enable Recipes", true,
-                new ConfigDescription("Enable or disable all idol crafting recipes.", null, isAdminOnly));
-            Recipe_Upgrader0Armor = Config.Bind("Recipes", "02. Wooden Protection Idol",
+            EnableRecipes = Config.BindConfig("Recipes", "Enable Recipes", true,
+                "Enable or disable all idol crafting recipes.", isAdminOnly, 20);
+            Recipe_Upgrader0Armor = Config.BindConfig("Recipes", "Wooden Protection Idol",
                 "Wood:50,GreydwarfEye:10",
-                new ConfigDescription("Ingredients for Wooden Protection Idol: comma-separated entries 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader0Weapon = Config.Bind("Recipes", "03. Wooden Battle Idol",
+                "Ingredients for Wooden Protection Idol: comma-separated entries 'PrefabName:Amount'.", isAdminOnly, 19);
+
+            Recipe_Upgrader0Weapon = Config.BindConfig("Recipes", "Wooden Battle Idol",
                 "Wood:50,GreydwarfEye:10",
-                new ConfigDescription("Ingredients for Wooden Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
+                "Ingredients for Wooden Battle Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 18);
 
-            Recipe_Upgrader1Armor = Config.Bind("Recipes", "04. Bronze Protection Idol",
+            Recipe_Upgrader1Armor = Config.BindConfig("Recipes", "Bronze Protection Idol",
                 "Bronze:10,SurtlingCore:1",
-                new ConfigDescription("Ingredients for Bronze Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader1Weapon = Config.Bind("Recipes", "05. Bronze Battle Idol",
+                "Ingredients for Bronze Protection Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 17);
+
+            Recipe_Upgrader1Weapon = Config.BindConfig("Recipes", "Bronze Battle Idol",
                 "Bronze:10,SurtlingCore:1",
-                new ConfigDescription("Ingredients for Bronze Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
+                "Ingredients for Bronze Battle Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 16);
 
-            Recipe_Upgrader2Armor = Config.Bind("Recipes", "06. Iron Protection Idol",
+            Recipe_Upgrader2Armor = Config.BindConfig("Recipes", "Iron Protection Idol",
                 "Iron:10,ElderBark:5",
-                new ConfigDescription("Ingredients for Iron Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader2Weapon = Config.Bind("Recipes", "07. Iron Battle Idol",
+                "Ingredients for Iron Protection Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 15);
+            Recipe_Upgrader2Weapon = Config.BindConfig("Recipes", "Iron Battle Idol",
                 "Iron:10,ElderBark:5",
-                new ConfigDescription("Ingredients for Iron Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
+                "Ingredients for Iron Battle Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 14);
 
-            Recipe_Upgrader3Armor = Config.Bind("Recipes", "08. Silver Protection Idol",
+            Recipe_Upgrader3Armor = Config.BindConfig("Recipes", "Silver Protection Idol",
                 "Silver:10,FreezeGland:5,Obsidian:5",
-                new ConfigDescription("Ingredients for Silver Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader3Weapon = Config.Bind("Recipes", "09. Silver Battle Idol",
+                "Ingredients for Silver Protection Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 13);
+
+            Recipe_Upgrader3Weapon = Config.BindConfig("Recipes", "Silver Battle Idol",
                 "Silver:10,FreezeGland:5,Obsidian:5",
-                new ConfigDescription("Ingredients for Silver Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
+                "Ingredients for Silver Battle Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 12);
 
-            Recipe_Upgrader4Armor = Config.Bind("Recipes", "10. Black Metal Protection Idol",
+            Recipe_Upgrader4Armor = Config.BindConfig("Recipes", "Black Metal Protection Idol",
                 "BlackMetal:10,Needle:2,Tar:5",
-                new ConfigDescription("Ingredients for Black Metal Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader4Weapon = Config.Bind("Recipes", "11. Black Metal Battle Idol",
+                "Ingredients for Black Metal Protection Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 11);
+
+            Recipe_Upgrader4Weapon = Config.BindConfig("Recipes", "Black Metal Battle Idol",
                 "BlackMetal:10,Needle:2,Tar:5",
-                new ConfigDescription("Ingredients for Black Metal Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
+                "Ingredients for Black Metal Battle Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 10);
 
-            Recipe_Upgrader5Armor = Config.Bind("Recipes", "12. Black Marble Protection Idol",
+            Recipe_Upgrader5Armor = Config.BindConfig("Recipes", "Black Marble Protection Idol",
                 "BlackMarble:20,BugMeat:10,Carapace:10",
-                new ConfigDescription("Ingredients for Black Marble Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader5Weapon = Config.Bind("Recipes", "13. Black Marble Battle Idol",
+                "Ingredients for Black Marble Protection Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 9);
+
+            Recipe_Upgrader5Weapon = Config.BindConfig("Recipes", "Black Marble Battle Idol",
                 "BlackMarble:20,BugMeat:10,Carapace:10",
-                new ConfigDescription("Ingredients for Black Marble Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
+                "Ingredients for Black Marble Battle Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 8);
 
-            Recipe_Upgrader6Armor = Config.Bind("Recipes", "14. Flametal Protection Idol",
+            Recipe_Upgrader6Armor = Config.BindConfig("Recipes", "Flametal Protection Idol",
                 "FlametalNew:10,CharredBone:15",
-                new ConfigDescription("Ingredients for Flametal Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader6Weapon = Config.Bind("Recipes", "15. Flametal Battle Idol",
-                "FlametalNew:10,CharredBone:15",
-                new ConfigDescription("Ingredients for Flametal Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
+                "Ingredients for Flametal Protection Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 7);
 
-            Recipe_Upgrader7Armor = Config.Bind("Recipes", "16. Bloodgold Protection Idol",
+            Recipe_Upgrader6Weapon = Config.BindConfig("Recipes", "Flametal Battle Idol",
+                "FlametalNew:10,CharredBone:15",
+                "Ingredients for Flametal Battle Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 6);
+
+            Recipe_Upgrader7Armor = Config.BindConfig("Recipes", "Bloodgold Protection Idol",
                 "Gold:10,Coins:40,AncientCoin:10",
-                new ConfigDescription("Ingredients for Bloodgold Protection Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
-            Recipe_Upgrader7Weapon = Config.Bind("Recipes", "17. Bloodgold Battle Idol",
+                "Ingredients for Bloodgold Protection Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 5);
+
+            Recipe_Upgrader7Weapon = Config.BindConfig("Recipes", "Bloodgold Battle Idol",
                 "Gold:10,Coins:40,AncientCoin:10",
-                new ConfigDescription("Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.", null, isAdminOnly));
+                "Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 4);
             #endregion
 
-            EnableDebugLogging = Config.Bind("Logging", "01. Enable Debug Logging", false,
-                new ConfigDescription("Show debug logging", null));
+            EnableDebugLogging = Config.BindConfig("Logging", "Enable Debug Logging", false,
+                "Show debug logging", false);
 
             AddConfigurableRecipes();
 
