@@ -17,6 +17,7 @@ using static ClutterSystem;
 using static ItemDrop;
 using static Version;
 using Logger = Jotunn.Logger;
+using ReforgedPotential.Compatibility;
 namespace ReforgedPotential
 {
     [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
@@ -113,6 +114,11 @@ namespace ReforgedPotential
             InitConfig();
             CreateConfigWatcher();
             harmony.PatchAll();
+        }
+
+        private void Start()
+        {
+            EpicLootCompatibility.Init();
         }
 
         #region RPC Handlers
@@ -545,7 +551,6 @@ namespace ReforgedPotential
                             playerName,
                             craftedItemPosition,
                             craftWasCheated);
-
                         player.Message(MessageHud.MessageType.Center, failureMessage, 0, null, log: true);
                         outcome = UpgradeOutcome.Degraded;
                     }
@@ -581,6 +586,11 @@ namespace ReforgedPotential
                     var itemName = Localization.instance.Localize(upgradeItemName);
 
                     int targetLevel = craftQuality;
+
+                    if (outcome == UpgradeOutcome.Degraded || outcome == UpgradeOutcome.Upgraded)
+                    {
+                        EpicLootCompatibility.TryCopyMagicItem(__instance.m_craftUpgradeItem, craftedItem);
+                    }
                     bool success = outcome == UpgradeOutcome.Upgraded;
                     BroadcastUpgradeResult(playerName, itemName, targetLevel, success);
                     Gogan.LogEvent("Game","Crafted", __instance.m_craftRecipe.m_item.m_itemData.m_shared.m_name, craftQuality);
