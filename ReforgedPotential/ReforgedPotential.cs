@@ -203,14 +203,6 @@ namespace ReforgedPotential
             configFileWatcher.OnConfigFileReloaded += () =>
             {
                 LoadConfig();
-                SyncRecipes();
-                if (!(ZNet.instance == null) && ZNet.instance.IsServer())
-                {
-                    Logger.LogInfo("Configuration file has been changed, reloading settings.");
-                    LoadConfig();
-                    return;
-                }
-                Jotunn.Logger.LogWarning("Configuration file has been changed, ignoring changes if not the server.");
             };
         }
         private void LoadConfig()
@@ -926,7 +918,7 @@ namespace ReforgedPotential
                         Name = $"RFG_{prefabName}",
                         Item = prefabName,
                         CraftingStation = craftingStationId,
-                        Enabled = true,
+                        Enabled = EnableRecipes.Value,
                         MinStationLevel = 1
                     };
 
@@ -998,7 +990,9 @@ namespace ReforgedPotential
                         ("Upgrader7Armor", Recipe_Upgrader7Armor),
                         ("Upgrader7Weapon", Recipe_Upgrader7Weapon)
                 };
-
+                var craftingStationId = string.IsNullOrEmpty(Station_Global.Value.Trim().Trim('$')) ? "" : Station_Global.Value.Trim().Trim('$');
+                var craftingStationPrefab = PrefabManager.Instance.GetPrefab(craftingStationId);
+                var craftingStation = craftingStationPrefab?.GetComponent<CraftingStation>();
                 foreach (var (prefabName, cfgEntry) in targets)
                 {
                     string cfgValue = cfgEntry?.Value?.Trim();
@@ -1008,11 +1002,9 @@ namespace ReforgedPotential
                         continue;
                     }
 
-                    var craftingStationId = string.IsNullOrEmpty(Station_Global.Value.Trim().Trim('$')) ? "" : Station_Global.Value.Trim().Trim('$');
-                    var craftingStation = PrefabManager.Instance.GetPrefab(craftingStationId);
                     var recipe = ItemManager.Instance.GetRecipe($"RFG_{prefabName}").Recipe;
                     recipe.m_item = PrefabManager.Instance.GetPrefab(prefabName).GetComponent<ItemDrop>();
-                    recipe.m_craftingStation = craftingStation?.GetComponent<CraftingStation>();
+                    recipe.m_craftingStation = craftingStation;
                     recipe.m_enabled = EnableRecipes.Value;
 
                     var requirements = new List<Piece.Requirement>();
