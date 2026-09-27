@@ -31,6 +31,9 @@
     <Reference Include="com.rlabrecque.steamworks.net">
       <HintPath>libs\com.rlabrecque.steamworks.net.dll</HintPath>
     </Reference>
+    <Reference Include="EpicLootAPI">
+      <HintPath>libs\EpicLootAPI.dll</HintPath>
+    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
@@ -47,7 +50,11 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="JotunnLib" Version="2.30.1" />
+    <PackageReference Include="ILRepack.Lib.MSBuild.Task" Version="2.0.48">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="JotunnLib" Version="2.30.2" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -96,5 +103,7 @@
   <Target Name="JotunnPostBuildTaskUnix" AfterTargets="Build" Condition=" '$(OS)' == 'Unix' ">
     <Exec Command="sh &quot;$(SolutionDir)scripts/publish.sh&quot; --target &quot;$(ConfigurationName)&quot; --target-path &quot;$(TargetDir)&quot; --target-assembly &quot;$(TargetFileName)&quot; --valheim-path &quot;$(VALHEIM_INSTALL)&quot; --deploy-path &quot;$(MOD_DEPLOYPATH)&quot; --project-path &quot;$(ProjectDir)&quot;" />
   </Target>
+
+	<Import Project="$(MSBuildProjectDirectory)\ILRepack.targets" />
 </Project>
 
