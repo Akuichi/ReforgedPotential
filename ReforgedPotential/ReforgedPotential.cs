@@ -38,7 +38,6 @@ namespace ReforgedPotential
         internal static ConfigEntry<bool> EnableServerSync;
 
         internal static ConfigEntry<bool> EnableBossProgression;
-
         internal static ConfigEntry<int> BaseUpgradeLimit;
 
         internal static ConfigEntry<int> Boss1MaxUpgradeLevel;
@@ -49,6 +48,8 @@ namespace ReforgedPotential
         internal static ConfigEntry<int> Boss6MaxUpgradeLevel;
         internal static ConfigEntry<int> Boss7MaxUpgradeLevel;
         internal static ConfigEntry<int> Boss8MaxUpgradeLevel;
+
+        internal static ConfigEntry<bool> AllowExtraUpgradeLimitOnCurrentTier;
 
         internal static Dictionary<int, int> bossUpgradeValues;
 
@@ -101,12 +102,16 @@ namespace ReforgedPotential
         internal static ConfigEntry<bool> RefundIdolsOnBreak;
         internal static ConfigEntry<int> RefundIdolsOnBreakStartingLevel;
         internal static ConfigEntry<float> RefundIdolsPercentageOnBreak;
-        public static CustomRPC RPC_Reforged;
-        public static ConfigEntry<bool> EnableGlobalUpgradeNotifications;
-        public static ConfigEntry<string> SuccessMessage;
-        public static ConfigEntry<string> FailedMessage;
+        internal static ConfigEntry<bool> EnableLevelCap;
+        internal static ConfigEntry<int> LevelCap;
 
-        public static ConfigEntry<bool> EnableDebugLogging;
+        internal static ConfigEntry<bool> EnableGlobalUpgradeNotifications;
+        internal static ConfigEntry<string> SuccessMessage;
+        internal static ConfigEntry<string> FailedMessage;
+
+        internal static ConfigEntry<bool> EnableDebugLogging;
+
+        internal static CustomRPC RPC_Reforged;
 
         #endregion
 
@@ -266,6 +271,11 @@ namespace ReforgedPotential
             RefundIdolsPercentageOnBreak = Config.BindConfig("Upgrade Settings", "Refund Idols Percentage On Break", 0.3f,
                 "Percentage of idols refunded when an equipment breaks.", isAdminOnly, 9, floatRange);
 
+            EnableLevelCap = Config.BindConfig("Upgrade Settings", "Enable Level Cap", false,
+                "If true, a level cap is enforced for all equipment upgrades (This takes precedence over boss upgrade limits)", isAdminOnly, 8);
+            LevelCap = Config.BindConfig("Upgrade Settings", "Level Cap", 10,
+                "The maximum level that an equipment can be upgraded to if Enable Level Cap is set to true.", isAdminOnly, 8);
+
             #endregion
             //--------------
             #region Boss Progression
@@ -301,6 +311,8 @@ namespace ReforgedPotential
                 { 7, Boss7MaxUpgradeLevel.Value },
                 { 8, Boss8MaxUpgradeLevel.Value }
             };
+            AllowExtraUpgradeLimitOnCurrentTier = Config.BindConfig("Boss Progression", "Allow Extra Upgrade Limit On Current Tier", true,
+                "If true, the current boss tier will allow for an extra upgrade limit on the current tier. (Ex. If you have defeated Eikthyr, you can upgrade Bronze tier items one level past the base limit)", isAdminOnly, 1);
             #endregion
             //--------------
             #region Idol Progression
@@ -695,6 +707,12 @@ namespace ReforgedPotential
                                 continue;
                             }
                             int maxUpgradeLevel = UpgradeHelper.GetMaxUpgradeLevel(itemTier, highestBossTier);
+                            if (EnableLevelCap.Value)
+                            {
+                                Jotunn.Logger.LogInfo($"Level cap is enabled, overriding max upgrade level for {selectedItemData.m_shared.m_name} to {LevelCap.Value}.");
+                                maxUpgradeLevel = Math.Max(1, LevelCap.Value);
+                            }
+                            
                             var itemQuality = selectedItemData.m_quality;
 
                             if (itemQuality >= maxUpgradeLevel)
@@ -714,9 +732,7 @@ namespace ReforgedPotential
                                     $"max allowed={maxUpgradeLevel}, " +
                                     $"required boss={requiredBossName ?? "none"}.");
 
-                                player?.Message(
-                                    MessageHud.MessageType.Center,
-                                    requiredBossName != null ? $"Defeat {requiredBossName} to upgrade this weapon further." : "Max upgrade level reached!");
+                                player?.Message(MessageHud.MessageType.Center, requiredBossName != null ? $"Defeat {requiredBossName} to upgrade this weapon further." : "Max upgrade level reached!");
                                 return false;
                             }
                             return true;
