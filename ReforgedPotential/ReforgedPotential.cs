@@ -264,7 +264,7 @@ namespace ReforgedPotential
                 "If true, a percentage of the idols used are refunded when an equipment breaks", isAdminOnly, 11);
 
             RefundIdolsOnBreakStartingLevel = Config.BindConfig("Upgrade Settings", "Refund Idols On Break Starting Level", 5,
-                "Calculation of the refunded idols starts at this level. (Ex. at value 5: Levels 1-4 are not included for the idol refund calculations",
+                "Calculation of the refunded idols starts at this level. (Ex. at value 5: Levels 1-4 are not included for the idol refund calculations)",
                 isAdminOnly, 10, intRange);
 
             floatRange = new AcceptableValueRange<float>(0, 1);
@@ -322,7 +322,7 @@ namespace ReforgedPotential
             #endregion
             //--------------
             Station_Global = Config.BindConfig("Crafting Station", "Global Station", "piece_artisanstation",
-               "Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. 'piece_workbench'). Empty = craftable by hand.", isAdminOnly);
+               "Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. 'piece_workbench').", isAdminOnly);
             //--------------
             #region Recipes
             EnableRecipes = Config.BindConfig("Recipes", "Enable Recipes", true,
