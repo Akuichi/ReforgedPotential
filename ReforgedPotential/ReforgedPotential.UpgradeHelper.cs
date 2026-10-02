@@ -66,8 +66,8 @@ namespace ReforgedPotential
                     }
                 }
 
-                // If the equipment tier matches the highest defeated boss tier,alow one additional upgrade for that tier
-                if (itemTier == highestBossTier)
+                // If the equipment tier matches the highest defeated boss tier, allow one additional upgrade for that tier
+                if (itemTier == highestBossTier && AllowExtraUpgradeLimitOnCurrentTier.Value)
                 {
                     maxUpgrade += 1;
 
@@ -78,6 +78,11 @@ namespace ReforgedPotential
             }
             public static int GetRequiredBossForNextUpgrade(int itemTier, int currentUpgrade)
             {
+                if (EnableLevelCap.Value)
+                {
+                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"GetRequiredBossForNextUpgrade: Level cap is enabled. Returning -1.");
+                    return -1;
+                }
                 int cumulativeUpgrade = BaseUpgradeLimit.Value;
                 if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"GetRequiredBossForNextUpgrade: itemTier={itemTier}, currentUpgrade={currentUpgrade}, base={cumulativeUpgrade}");
                 // Start checking from the boss above the item's tier
