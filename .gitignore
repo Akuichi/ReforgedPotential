@@ -362,3 +362,6 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 /ReforgedPotentialUnity
+ReforgedPotential.Tests/ReforgedPotential.Tests.csproj
+ReforgedPotential.Tests/UpgradeCalculationsTests.cs
+ReforgedPotential/UpgradeCalculations.cs

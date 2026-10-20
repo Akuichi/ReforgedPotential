@@ -29,7 +29,7 @@ namespace ReforgedPotential
     {
         public const string PluginGUID = "akuichi.ReforgedPotential";
         public const string PluginName = "Reforged Potential";
-        public const string PluginVersion = "2.0.6";
+        public const string PluginVersion = "2.0.8";
 
 
         private readonly Harmony harmony = new Harmony(PluginGUID);
@@ -38,7 +38,6 @@ namespace ReforgedPotential
         internal static ConfigEntry<bool> EnableServerSync;
 
         internal static ConfigEntry<bool> EnableBossProgression;
-
         internal static ConfigEntry<int> BaseUpgradeLimit;
 
         internal static ConfigEntry<int> Boss1MaxUpgradeLevel;
@@ -49,6 +48,8 @@ namespace ReforgedPotential
         internal static ConfigEntry<int> Boss6MaxUpgradeLevel;
         internal static ConfigEntry<int> Boss7MaxUpgradeLevel;
         internal static ConfigEntry<int> Boss8MaxUpgradeLevel;
+
+        internal static ConfigEntry<bool> AllowExtraUpgradeLimitOnCurrentTier;
 
         internal static Dictionary<int, int> bossUpgradeValues;
 
@@ -101,12 +102,19 @@ namespace ReforgedPotential
         internal static ConfigEntry<bool> RefundIdolsOnBreak;
         internal static ConfigEntry<int> RefundIdolsOnBreakStartingLevel;
         internal static ConfigEntry<float> RefundIdolsPercentageOnBreak;
-        public static CustomRPC RPC_Reforged;
-        public static ConfigEntry<bool> EnableGlobalUpgradeNotifications;
-        public static ConfigEntry<string> SuccessMessage;
-        public static ConfigEntry<string> FailedMessage;
+        internal static ConfigEntry<bool> EnableLevelCap;
+        internal static ConfigEntry<int> LevelCap;
 
-        public static ConfigEntry<bool> EnableDebugLogging;
+        internal static ConfigEntry<bool> EnableGlobalUpgradeNotifications;
+        internal static ConfigEntry<string> SuccessMessage;
+        internal static ConfigEntry<string> FailedMessage;
+
+        internal static ConfigEntry<bool> PatchVanillaUpgraderRecipes;
+        internal static ConfigEntry<bool> PatchVanillaCapes;
+
+        internal static ConfigEntry<bool> EnableDebugLogging;
+
+        internal static CustomRPC RPC_Reforged;
 
         #endregion
 
@@ -259,12 +267,17 @@ namespace ReforgedPotential
                 "If true, a percentage of the idols used are refunded when an equipment breaks", isAdminOnly, 11);
 
             RefundIdolsOnBreakStartingLevel = Config.BindConfig("Upgrade Settings", "Refund Idols On Break Starting Level", 5,
-                "Calculation of the refunded idols starts at this level. (Ex. at value 5: Levels 1-4 are not included for the idol refund calculations",
+                "Calculation of the refunded idols starts at this level. (Ex. at value 5: Levels 1-4 are not included for the idol refund calculations)",
                 isAdminOnly, 10, intRange);
 
             floatRange = new AcceptableValueRange<float>(0, 1);
             RefundIdolsPercentageOnBreak = Config.BindConfig("Upgrade Settings", "Refund Idols Percentage On Break", 0.3f,
                 "Percentage of idols refunded when an equipment breaks.", isAdminOnly, 9, floatRange);
+
+            EnableLevelCap = Config.BindConfig("Upgrade Settings", "Enable Level Cap", false,
+                "If true, a level cap is enforced for all equipment upgrades (This takes precedence over boss upgrade limits)", isAdminOnly, 8);
+            LevelCap = Config.BindConfig("Upgrade Settings", "Level Cap", 10,
+                "The maximum level that an equipment can be upgraded to if Enable Level Cap is set to true.", isAdminOnly, 8);
 
             #endregion
             //--------------
@@ -301,6 +314,8 @@ namespace ReforgedPotential
                 { 7, Boss7MaxUpgradeLevel.Value },
                 { 8, Boss8MaxUpgradeLevel.Value }
             };
+            AllowExtraUpgradeLimitOnCurrentTier = Config.BindConfig("Boss Progression", "Allow Extra Upgrade Limit On Current Tier", true,
+                "If true, the current boss tier will allow for an extra upgrade limit on the current tier. (Ex. If you have defeated Eikthyr, you can upgrade Bronze tier items one level past the base limit)", isAdminOnly, 1);
             #endregion
             //--------------
             #region Idol Progression
@@ -310,7 +325,7 @@ namespace ReforgedPotential
             #endregion
             //--------------
             Station_Global = Config.BindConfig("Crafting Station", "Global Station", "piece_artisanstation",
-               "Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. 'piece_workbench'). Empty = craftable by hand.", isAdminOnly);
+               "Global crafting station for all configurable upgrader recipes. Use station m_name (e.g. 'piece_workbench').", isAdminOnly);
             //--------------
             #region Recipes
             EnableRecipes = Config.BindConfig("Recipes", "Enable Recipes", true,
@@ -379,6 +394,12 @@ namespace ReforgedPotential
                 "Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 4);
             #endregion
 
+            //--------------
+            PatchVanillaUpgraderRecipes = Config.BindConfig("Vanilla Recipe Fixes", "Patch Vanilla Upgrader Recipes", true,
+                "If true, some known recipes that uses the wrong upgrader resources will be patched; (Ex. Headdress of the Bear will now ask for Bronze Protection Idol instead of Black Marble Protection Idol)", isAdminOnly, 3);
+            PatchVanillaCapes = Config.BindConfig("Vanilla Recipe Fixes", "Patch Vanilla Capes", true,
+                "If true, capes that start with 1 armor will now use the Wooden Idol as its base; (Affected: Linen Cape, Lox Cape, Troll Cape, Wolf Cape)", isAdminOnly, 2);
+            //--------------
             EnableDebugLogging = Config.BindConfig("Logging", "Enable Debug Logging", false,
                 "Show debug logging", false);
         }
@@ -695,6 +716,12 @@ namespace ReforgedPotential
                                 continue;
                             }
                             int maxUpgradeLevel = UpgradeHelper.GetMaxUpgradeLevel(itemTier, highestBossTier);
+                            if (EnableLevelCap.Value)
+                            {
+                                Jotunn.Logger.LogInfo($"Level cap is enabled, overriding max upgrade level for {selectedItemData.m_shared.m_name} to {LevelCap.Value}.");
+                                maxUpgradeLevel = Math.Max(1, LevelCap.Value);
+                            }
+                            
                             var itemQuality = selectedItemData.m_quality;
 
                             if (itemQuality >= maxUpgradeLevel)
@@ -714,9 +741,7 @@ namespace ReforgedPotential
                                     $"max allowed={maxUpgradeLevel}, " +
                                     $"required boss={requiredBossName ?? "none"}.");
 
-                                player?.Message(
-                                    MessageHud.MessageType.Center,
-                                    requiredBossName != null ? $"Defeat {requiredBossName} to upgrade this weapon further." : "Max upgrade level reached!");
+                                player?.Message(MessageHud.MessageType.Center, requiredBossName != null ? $"Defeat {requiredBossName} to upgrade this weapon further." : "Max upgrade level reached!");
                                 return false;
                             }
                             return true;
@@ -964,6 +989,132 @@ namespace ReforgedPotential
             catch (Exception ex)
             {
                 Jotunn.Logger.LogError($"AddConfigurableRecipes exception: {ex}");
+            }
+        }
+
+        [HarmonyPatch(typeof(ObjectDB))]
+        static class ObjectDBPatch
+        {
+            [HarmonyPostfix]
+            [HarmonyPatch(nameof(ObjectDB.Awake))]
+            static void AwakePostfix(ObjectDB __instance)
+            {
+                if (PatchVanillaUpgraderRecipes.Value)
+                {
+                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patching vanilla upgrader recipes...");
+                    var recipes = __instance.m_recipes;
+                    if (recipes == null)
+                    {
+                        Jotunn.Logger.LogWarning("ObjectDB recipes are not initialized.");
+                        return;
+                    }
+                    foreach (var recipe in recipes)
+                    {
+                        if (recipe.name == "Recipe_HelmetBerserker")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader1Armor").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_HelmetBerserker");
+                                }
+                            }
+                        }
+
+                        if (recipe.name == "Recipe_HelmetGold")
+                        {
+                            var resources = recipe.m_resources.ToList();
+
+                            var upgraderPrefab = PrefabManager.Instance.GetPrefab("Upgrader7Armor");
+                            var upgraderItem = upgraderPrefab?.GetComponent<ItemDrop>();
+
+                            resources.Add(new Piece.Requirement
+                            {
+                                m_resItem = upgraderItem,
+                                m_amount = 1,
+                                m_upgraderResource = true,
+                                m_amountPerLevel = 0
+                            });
+
+                            recipe.m_resources = resources.ToArray();
+
+                            if (EnableDebugLogging.Value)
+                            {
+                                Jotunn.Logger.LogInfo("Patched Recipe_HelmetGold");
+                            }
+                        }
+
+                        if (recipe.name == "Recipe_AxeJotunBane")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader5Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_AxeJotunBane");
+                                }
+                            }
+                        }
+
+                        if (PatchVanillaCapes.Value)
+                        {
+                            if (recipe.name == "Recipe_CapeLinen")
+                            {
+                                var resources = recipe.m_resources;
+                                foreach (var req in resources)
+                                {
+                                    if (req.m_upgraderResource)
+                                    {
+                                        req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeLinen");
+                                    }
+                                }
+                            }
+
+                            if (recipe.name == "Recipe_CapeLox")
+                            {
+                                var resources = recipe.m_resources;
+                                foreach (var req in resources)
+                                {
+                                    if (req.m_upgraderResource)
+                                    {
+                                        req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeLox");
+                                    }
+                                }
+                            }
+
+                            if (recipe.name == "Recipe_CapeTrollHide")
+                            {
+                                var resources = recipe.m_resources;
+                                foreach (var req in resources)
+                                {
+                                    if (req.m_upgraderResource)
+                                    {
+                                        req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeTrollHide");
+                                    }
+                                }
+                            }
+
+                            if (recipe.name == "Recipe_CapeWolf")
+                            {
+                                var resources = recipe.m_resources;
+                                foreach (var req in resources)
+                                {
+                                    if (req.m_upgraderResource)
+                                    {
+                                        req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeWolf");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
