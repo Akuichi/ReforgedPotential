@@ -109,6 +109,9 @@ namespace ReforgedPotential
         internal static ConfigEntry<string> SuccessMessage;
         internal static ConfigEntry<string> FailedMessage;
 
+        internal static ConfigEntry<bool> PatchVanillaUpgraderRecipes;
+        internal static ConfigEntry<bool> PatchVanillaCapes;
+
         internal static ConfigEntry<bool> EnableDebugLogging;
 
         internal static CustomRPC RPC_Reforged;
@@ -391,6 +394,12 @@ namespace ReforgedPotential
                 "Ingredients for Bloodgold Battle Idol: comma-separated 'PrefabName:Amount'.", isAdminOnly, 4);
             #endregion
 
+            //--------------
+            PatchVanillaUpgraderRecipes = Config.BindConfig("Vanilla Recipe Fixes", "Patch Vanilla Upgrader Recipes", true,
+                "If true, some known recipes that uses the wrong upgrader resources will be patched; (Ex. Headdress of the Bear will now ask for Bronze Protection Idol instead of Black Marble Protection Idol)", isAdminOnly, 3);
+            PatchVanillaCapes = Config.BindConfig("Vanilla Recipe Fixes", "Patch Vanilla Capes", true,
+                "If true, capes that start with 1 armor will now use the Wooden Idol as its base; (Affected: Linen Cape, Lox Cape, Troll Cape, Wolf Cape)", isAdminOnly, 2);
+            //--------------
             EnableDebugLogging = Config.BindConfig("Logging", "Enable Debug Logging", false,
                 "Show debug logging", false);
         }
@@ -980,6 +989,132 @@ namespace ReforgedPotential
             catch (Exception ex)
             {
                 Jotunn.Logger.LogError($"AddConfigurableRecipes exception: {ex}");
+            }
+        }
+
+        [HarmonyPatch(typeof(ObjectDB))]
+        static class ObjectDBPatch
+        {
+            [HarmonyPostfix]
+            [HarmonyPatch(nameof(ObjectDB.Awake))]
+            static void AwakePostfix(ObjectDB __instance)
+            {
+                if (PatchVanillaUpgraderRecipes.Value)
+                {
+                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patching vanilla upgrader recipes...");
+                    var recipes = __instance.m_recipes;
+                    if (recipes == null)
+                    {
+                        Jotunn.Logger.LogWarning("ObjectDB recipes are not initialized.");
+                        return;
+                    }
+                    foreach (var recipe in recipes)
+                    {
+                        if (recipe.name == "Recipe_HelmetBerserker")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader1Armor").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_HelmetBerserker");
+                                }
+                            }
+                        }
+
+                        if (recipe.name == "Recipe_HelmetGold")
+                        {
+                            var resources = recipe.m_resources.ToList();
+
+                            var upgraderPrefab = PrefabManager.Instance.GetPrefab("Upgrader7Armor");
+                            var upgraderItem = upgraderPrefab?.GetComponent<ItemDrop>();
+
+                            resources.Add(new Piece.Requirement
+                            {
+                                m_resItem = upgraderItem,
+                                m_amount = 1,
+                                m_upgraderResource = true,
+                                m_amountPerLevel = 0
+                            });
+
+                            recipe.m_resources = resources.ToArray();
+
+                            if (EnableDebugLogging.Value)
+                            {
+                                Jotunn.Logger.LogInfo("Patched Recipe_HelmetGold");
+                            }
+                        }
+
+                        if (recipe.name == "Recipe_AxeJotunBane")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader5Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_AxeJotunBane");
+                                }
+                            }
+                        }
+
+                        if (PatchVanillaCapes.Value)
+                        {
+                            if (recipe.name == "Recipe_CapeLinen")
+                            {
+                                var resources = recipe.m_resources;
+                                foreach (var req in resources)
+                                {
+                                    if (req.m_upgraderResource)
+                                    {
+                                        req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeLinen");
+                                    }
+                                }
+                            }
+
+                            if (recipe.name == "Recipe_CapeLox")
+                            {
+                                var resources = recipe.m_resources;
+                                foreach (var req in resources)
+                                {
+                                    if (req.m_upgraderResource)
+                                    {
+                                        req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeLox");
+                                    }
+                                }
+                            }
+
+                            if (recipe.name == "Recipe_CapeTrollHide")
+                            {
+                                var resources = recipe.m_resources;
+                                foreach (var req in resources)
+                                {
+                                    if (req.m_upgraderResource)
+                                    {
+                                        req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeTrollHide");
+                                    }
+                                }
+                            }
+
+                            if (recipe.name == "Recipe_CapeWolf")
+                            {
+                                var resources = recipe.m_resources;
+                                foreach (var req in resources)
+                                {
+                                    if (req.m_upgraderResource)
+                                    {
+                                        req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeWolf");
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
         }
 
