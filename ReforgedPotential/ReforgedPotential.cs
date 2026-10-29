@@ -402,6 +402,8 @@ namespace ReforgedPotential
             //--------------
             EnableDebugLogging = Config.BindConfig("Logging", "Enable Debug Logging", false,
                 "Show debug logging", false);
+
+            Config.Save();
         }
         #endregion
 
@@ -1059,6 +1061,147 @@ namespace ReforgedPotential
                             }
                         }
 
+                        //Splitnir
+                        if (recipe.name == "Recipe_SpearSplitner")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader6Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_SpearSplitner");
+                                }
+                            }
+                        }
+
+                        //Splitnir the Bleeding
+                        if (recipe.name == "Recipe_SpearSplitner_Blood")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader6Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_SpearSplitner_Blood");
+                                }
+                            }
+                        }
+
+                        //Splitnir the Storming
+                        if (recipe.name == "Recipe_SpearSplitner_Lightning")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader6Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_SpearSplitner_Lightning");
+                                }
+                            }
+                        }
+
+                        //Splitnir the Primal
+                        if (recipe.name == "Recipe_SpearSplitner_Nature")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader6Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_SpearSplitner_Nature");
+                                }
+                            }
+                        }
+
+                        //Abyssal Razor
+                        if (recipe.name == "Recipe_KnifeChitin")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader2Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_KnifeChitin");
+                                }
+                            }
+                        }
+
+                        //Skoll and Hati
+                        if (recipe.name == "Recipe_KnifeSkollAndHati")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader5Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_KnifeSkollAndHati");
+                                }
+                            }
+                        }
+
+                        //Nord Knucklechains
+                        if (recipe.name == "Recipe_FistweaponGold")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader7Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_FistweaponGold");
+                                }
+                            }
+                        }
+
+                        //Early Axes
+                        if (recipe.name == "Recipe_AxeEarly")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader1Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_AxeEarly");
+                                }
+                            }
+                        }
+
+                        //Draugr Fang
+                        if (recipe.name == "Recipe_BowDraugrFang")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader3Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_BowDraugrFang");
+                                }
+                            }
+                        }
+
+                        //Iron Axe
+                        if (recipe.name == "Recipe_AxeIron")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader2Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_AxeIron");
+                                }
+                            }
+                        }
+
+                        // --- capes
                         if (PatchVanillaCapes.Value)
                         {
                             if (recipe.name == "Recipe_CapeLinen")
@@ -1109,6 +1252,32 @@ namespace ReforgedPotential
                                     {
                                         req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
                                         if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeWolf");
+                                    }
+                                }
+                            }
+
+                            if (recipe.name == "Recipe_CapeFeather")
+                            {
+                                var resources = recipe.m_resources;
+                                foreach (var req in resources)
+                                {
+                                    if (req.m_upgraderResource)
+                                    {
+                                        req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeFeather");
+                                    }
+                                }
+                            }
+
+                            if (recipe.name == "Recipe_CapeAsksvin")
+                            {
+                                var resources = recipe.m_resources;
+                                foreach (var req in resources)
+                                {
+                                    if (req.m_upgraderResource)
+                                    {
+                                        req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader0Armor").GetComponent<ItemDrop>();
+                                        if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_CapeAsksvin");
                                     }
                                 }
                             }
