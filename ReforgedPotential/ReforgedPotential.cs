@@ -679,8 +679,7 @@ namespace ReforgedPotential
             {
                 try
                 {
-                    if (EnableBossProgression.Value == false) return true;
-
+                    if (EnableBossProgression.Value == false && EnableLevelCap.Value == false) return true;
                     var selectedRecipePair = __instance.m_selectedRecipe;
                     var selectedRecipe = selectedRecipePair.Recipe;
                     var selectedItemData = selectedRecipePair.ItemData;
