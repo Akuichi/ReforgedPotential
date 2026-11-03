@@ -29,7 +29,7 @@ namespace ReforgedPotential
     {
         public const string PluginGUID = "akuichi.ReforgedPotential";
         public const string PluginName = "Reforged Potential";
-        public const string PluginVersion = "2.0.9";
+        public const string PluginVersion = "2.0.10";
 
 
         private readonly Harmony harmony = new Harmony(PluginGUID);
@@ -92,6 +92,7 @@ namespace ReforgedPotential
 
         internal static ConfigEntry<float> UpgradeChance;
         internal static ConfigEntry<float> BreakChance;
+        internal static ConfigEntry<bool> UseCustomChances;
         internal static ConfigEntry<bool> ConsumeIdolsOnlyOnFailure;
         internal static ConfigEntry<int> CostStart;
         internal static ConfigEntry<int> CostIncreaseInterval;
@@ -236,7 +237,10 @@ namespace ReforgedPotential
                 "Chance for an upgrade to succeed.", isAdminOnly, 20, floatRange);
             BreakChance = Config.BindConfig("Upgrade Settings", "Break Chance", 0f,
                 "When an upgrade fails, this is the chance for it to break (Ex. 1 = Item will always break on upgrade failure, 0 = Item will just degrade 1 level on upgrade failure)",
-                isAdminOnly, 19, floatRange);
+                isAdminOnly, 20, floatRange);
+            UseCustomChances = Config.BindConfig("Upgrade Settings", "Use Custom Chances from Json file", false,
+                "If true, you can map out custom values for upgrade/break chances per level. If false, the default upgrade chances will be used (See upgrade_chances.json)",
+                isAdminOnly, 19);
             ConsumeIdolsOnlyOnFailure = Config.BindConfig("Upgrade Settings", "Consume Idols Only On Failure", false,
                 "If true, idols are just consumed and the item doesn't lose a level (Breaking still removes the item)", isAdminOnly, 18);
 
@@ -402,7 +406,7 @@ namespace ReforgedPotential
             //--------------
             EnableDebugLogging = Config.BindConfig("Logging", "Enable Debug Logging", false,
                 "Show debug logging", false);
-
+            UpgradeHelper.LoadChanceConfiguration(Info.Location);
             Config.Save();
         }
         #endregion
@@ -484,10 +488,18 @@ namespace ReforgedPotential
 
                     float upgradeRandomRoll = UnityEngine.Random.Range(0f, 1f);
                     float breakRandomRoll = UnityEngine.Random.Range(0f, 1f);
-                    Jotunn.Logger.LogInfo($"DoCraftingPrefix: Upgrade roll: {upgradeRandomRoll * 100}, Break roll: {breakRandomRoll * 100}, Upgrade chance: {UpgradeChance.Value * 100}%, Break chance: {BreakChance.Value * 100}%");
+                    float upgradeChance = UpgradeChance.Value;
+                    float breakChance = BreakChance.Value;
+                    if (UseCustomChances.Value)
+                    {
+                        upgradeChance = UpgradeHelper.GetUpgradeChance(originalQuality);
+                        breakChance = UpgradeHelper.GetBreakChance(originalQuality);
+                    }                        
 
+                    Jotunn.Logger.LogInfo($"DoCraftingPrefix: Upgrade roll: {upgradeRandomRoll * 100}, Break roll: {breakRandomRoll * 100}, Upgrade chance: {upgradeChance * 100}%, Break chance: {breakChance * 100}%");
+                    
                     // Success
-                    if (UpgradeChance.Value >= upgradeRandomRoll)
+                    if (upgradeChance >= upgradeRandomRoll)
                     {
                         ZLog.Log($"Upgrader <color=yellow>succeeded</color> on " + $"{__instance.m_craftUpgradeItem.m_shared.m_name} level {craftQuality}!");
                         player.Message(MessageHud.MessageType.Center, Localization.instance.Localize("$msg_upgrader_success", __instance.m_craftUpgradeItem.m_shared.m_name, craftQuality.ToString()), 0, null, log: true);
@@ -505,7 +517,7 @@ namespace ReforgedPotential
                         outcome = UpgradeOutcome.Upgraded;
                     }
                     // Break
-                    else if (BreakChance.Value >= breakRandomRoll)
+                    else if (breakChance >= breakRandomRoll)
                     {
                         ZLog.Log($"Upgrader <color=red>BROKE</color> " + $"{sharedName} level " + $"{craftQuality - 1} and was destroyed!");
 
@@ -679,8 +691,7 @@ namespace ReforgedPotential
             {
                 try
                 {
-                    if (EnableBossProgression.Value == false) return true;
-
+                    if (EnableBossProgression.Value == false && EnableLevelCap.Value == false) return true;
                     var selectedRecipePair = __instance.m_selectedRecipe;
                     var selectedRecipe = selectedRecipePair.Recipe;
                     var selectedItemData = selectedRecipePair.ItemData;
@@ -743,7 +754,7 @@ namespace ReforgedPotential
                                     $"max allowed={maxUpgradeLevel}, " +
                                     $"required boss={requiredBossName ?? "none"}.");
 
-                                player?.Message(MessageHud.MessageType.Center, requiredBossName != null ? $"Defeat {requiredBossName} to upgrade this weapon further." : "Max upgrade level reached!");
+                                player?.Message(MessageHud.MessageType.Center, requiredBossName != null ? $"Defeat {requiredBossName} to upgrade this gear any further." : "Max upgrade level reached!");
                                 return false;
                             }
                             return true;

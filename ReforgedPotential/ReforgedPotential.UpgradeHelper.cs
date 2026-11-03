@@ -2,9 +2,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using UnityEngine;
-using static Mono.Security.X509.X520;
+using System.Globalization;
+using System.Text.RegularExpressions;
 namespace ReforgedPotential
 {
     public partial class ReforgedPotential
@@ -12,6 +14,23 @@ namespace ReforgedPotential
         #region Upgrade Helpers
         public static class UpgradeHelper
         {
+            [Serializable]
+            public sealed class ChanceEntry
+            {
+                public int Level;
+                public float UpgradeChance;
+                public float BreakChance;
+            }
+
+            [Serializable]
+            public sealed class ChanceConfiguration
+            {
+                public ChanceEntry[] Entries;
+            }
+
+            private static readonly List<ChanceEntry> ChanceEntries = new List<ChanceEntry>();
+            private const string ChanceFileName = "upgrade_chances.json";
+
             private static readonly (string EnemyId, int Tier, string Name)[] BossTiers =
             {
                 ("$enemy_frozenking_p3", 8, "Kall Fimbulbringer"),
@@ -299,6 +318,127 @@ namespace ReforgedPotential
 
                 candidateQuality = candidateMax - distanceFromMax;
                 candidateQuality = Math.Max(1, Math.Min(candidateMax, candidateQuality));
+            }                        
+
+            public static void LoadChanceConfiguration(string pluginLocation)
+            {
+                ChanceEntries.Clear();
+
+                string pluginDirectory = Path.GetDirectoryName(pluginLocation);
+                string chanceFilePath = Path.Combine(pluginDirectory, ChanceFileName);
+
+                try
+                {
+                    if (!File.Exists(chanceFilePath))
+                    {
+                        ChanceConfiguration defaultConfiguration = new ChanceConfiguration
+                        {
+                            Entries = Enumerable.Range(1, 10).Select(level => new ChanceEntry
+                                {
+                                    Level = level,
+                                    UpgradeChance = UpgradeChance.Value,
+                                    BreakChance = BreakChance.Value
+                                }).ToArray()
+                        };
+                    }
+
+                    string json = File.ReadAllText(chanceFilePath);
+
+                    MatchCollection entryMatches = Regex.Matches(
+                        json,
+                        @"\{[^{}]*""Level""\s*:\s*(?<level>-?\d+)[^{}]*""UpgradeChance""\s*:\s*(?<upgradeChance>-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)[^{}]*""BreakChance""\s*:\s*(?<breakChance>-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\}",
+                        RegexOptions.IgnoreCase);
+
+                    foreach (Match match in entryMatches)
+                    {
+                        if (!int.TryParse(match.Groups["level"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int level))
+                        {
+                            continue;
+                        }
+
+                        if (!float.TryParse(match.Groups["upgradeChance"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float upgradeChance))
+                        {
+                            continue;
+                        }
+
+                        if (!float.TryParse( match.Groups["breakChance"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float breakChance))
+                        {
+                            continue;
+                        }
+
+                        if (level <= 0)
+                        {
+                            continue;
+                        }
+
+                        ChanceEntries.Add(new ChanceEntry
+                        {
+                            Level = level,
+                            UpgradeChance = upgradeChance,
+                            BreakChance = breakChance
+                        });
+                    }
+
+                    ChanceEntries.Sort((left, right) => left.Level.CompareTo(right.Level));
+                }
+                catch (Exception exception)
+                {
+                    Jotunn.Logger.LogError( $"Failed to load {ChanceFileName}: {exception}");
+                }
+
+                if (ChanceEntries.Count == 0)
+                {
+                    ChanceEntries.Add(new ChanceEntry
+                    {
+                        Level = 1,
+                        UpgradeChance = UpgradeChance.Value,
+                        BreakChance = BreakChance.Value
+                    });
+
+                    if (EnableDebugLogging.Value) Jotunn.Logger.LogWarning($"{ChanceFileName} did not contain any valid entries. " + "Using the configured global chances.");
+                }
+
+                if (EnableDebugLogging.Value)
+                {
+                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"Loaded {ChanceEntries.Count} chance entries from {chanceFilePath}.");
+                }
+            }
+
+            private static ChanceEntry GetChanceEntry(int qualityLevel)
+            {
+                if (ChanceEntries.Count == 0)
+                {
+                    if (EnableDebugLogging.Value) Jotunn.Logger.LogWarning("GetChanceEntry: No chance entries loaded. Using default chances.");
+                    return new ChanceEntry
+                    {
+                        Level = 1,
+                        UpgradeChance = UpgradeChance.Value,
+                        BreakChance = BreakChance.Value
+                    };
+                }
+
+                ChanceEntry selectedEntry = ChanceEntries[0];
+
+                foreach (ChanceEntry entry in ChanceEntries)
+                {
+                    if (entry.Level > qualityLevel)
+                    {
+                        break;
+                    }
+
+                    selectedEntry = entry;
+                }
+
+                return selectedEntry;
+            }
+            public static float GetUpgradeChance(int qualityLevel)
+            {
+                return GetChanceEntry(qualityLevel).UpgradeChance;
+            }
+
+            public static float GetBreakChance(int qualityLevel)
+            {
+                return GetChanceEntry(qualityLevel).BreakChance;
             }
         }
 
