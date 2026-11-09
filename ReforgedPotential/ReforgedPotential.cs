@@ -94,6 +94,7 @@ namespace ReforgedPotential
         internal static ConfigEntry<float> BreakChance;
         internal static ConfigEntry<bool> UseCustomChances;
         internal static ConfigEntry<bool> ConsumeIdolsOnlyOnFailure;
+        internal static ConfigEntry<bool> RefundIdolsOnSuccess;
         internal static ConfigEntry<int> CostStart;
         internal static ConfigEntry<int> CostIncreaseInterval;
         internal static ConfigEntry<int> CostIncreasePerInterval;
@@ -234,16 +235,17 @@ namespace ReforgedPotential
             #region Upgrade Settings
             AcceptableValueRange<float> floatRange = new AcceptableValueRange<float>(0, 1);
             UpgradeChance = Config.BindConfig("Upgrade Settings", "Upgrade Chance", 1f,
-                "Chance for an upgrade to succeed.", isAdminOnly, 20, floatRange);
+                "Chance for an upgrade to succeed.", isAdminOnly, 22, floatRange);
             BreakChance = Config.BindConfig("Upgrade Settings", "Break Chance", 0f,
                 "When an upgrade fails, this is the chance for it to break (Ex. 1 = Item will always break on upgrade failure, 0 = Item will just degrade 1 level on upgrade failure)",
-                isAdminOnly, 20, floatRange);
+                isAdminOnly, 21, floatRange);
             UseCustomChances = Config.BindConfig("Upgrade Settings", "Use Custom Chances from Json file", false,
                 "If true, you can map out custom values for upgrade/break chances per level. If false, the default upgrade chances will be used (See upgrade_chances.json)",
-                isAdminOnly, 19);
+                isAdminOnly, 20);
             ConsumeIdolsOnlyOnFailure = Config.BindConfig("Upgrade Settings", "Consume Idols Only On Failure", false,
-                "If true, idols are just consumed and the item doesn't lose a level (Breaking still removes the item)", isAdminOnly, 18);
-
+                "If true, idols are just consumed and the item doesn't lose a level (Breaking still removes the item)", isAdminOnly, 19);
+            RefundIdolsOnSuccess = Config.BindConfig("Upgrade Settings", "Refund Idols On Success", false,
+                "If true, the used idols for upgrading are returned when the upgrade succeeds", isAdminOnly, 18);
             AcceptableValueRange<int> intRange = new AcceptableValueRange<int>(0, 1000);
 
             CostStart = Config.BindConfig("Upgrade Settings", "Cost Start", 1,
@@ -634,7 +636,15 @@ namespace ReforgedPotential
                         }
                         else
                         {
-                            player.ConsumeResources(__instance.m_craftRecipe.m_resources, craftQuality, -1, craftMultiplier);
+                            if (RefundIdolsOnSuccess.Value)
+                            {
+                                if (!upgradeSucceeded)
+                                    player.ConsumeResources(__instance.m_craftRecipe.m_resources, craftQuality, -1, craftMultiplier);
+                            }
+                            else
+                            {
+                                player.ConsumeResources(__instance.m_craftRecipe.m_resources, craftQuality, -1, craftMultiplier);
+                            }
                         }
                     }
                     __instance.UpdateCraftingPanel();

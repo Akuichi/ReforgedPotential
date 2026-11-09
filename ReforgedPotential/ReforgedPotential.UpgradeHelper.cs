@@ -281,8 +281,15 @@ namespace ReforgedPotential
                 if (!EnableBossProgression.Value && !EnableIdolProgression.Value)
                 {
                     equivalentTier = baseTier;
-                    candidateMax = GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
-                    candidateQuality = Math.Max(1, Math.Min(candidateMax, qualityLevel));
+                    if (EnableLevelCap.Value)
+                    {
+                        candidateMax = LevelCap.Value;
+                        candidateQuality = Math.Max(1, Math.Min(candidateMax, qualityLevel));
+                    }
+                    else
+                    {
+                        candidateQuality = qualityLevel;
+                    }
                     return;
                 }
 
