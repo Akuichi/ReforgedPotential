@@ -775,11 +775,15 @@ namespace ReforgedPotential
                     if (selectedItemData != null)
                     {
                         // Check for innate upgrade limit
-                        if (RequireFullUpgrade.Value && selectedItemData.m_shared.m_maxQuality > 0 && selectedItemData.m_quality < selectedItemData.m_shared.m_maxQuality)
+                        if (RequireFullUpgrade.Value)
                         {
-                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"Player attempted to upgrade {selectedItemData.m_shared.m_name} " + $"from quality {selectedItemData.m_quality} to {selectedItemData.m_quality + 1}. " + $"Max quality is {selectedItemData.m_shared.m_maxQuality}.");
-                            player?.Message(MessageHud.MessageType.Center, $"Upgrade this gear to level {selectedItemData.m_shared.m_maxQuality} to unlock its full potential.");
-                            return false;
+                            if (selectedItemData.m_shared.m_maxQuality > 0 && selectedItemData.m_quality < selectedItemData.m_shared.m_maxQuality)
+                            {
+                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"Player attempted to upgrade {selectedItemData.m_shared.m_name} " + $"from quality {selectedItemData.m_quality} to {selectedItemData.m_quality + 1}. " + $"Max quality is {selectedItemData.m_shared.m_maxQuality}.");
+                                player?.Message(MessageHud.MessageType.Center, $"Upgrade this gear to level {selectedItemData.m_shared.m_maxQuality} to unlock its full potential.");
+                                return false;
+                            }
+                            
                         }
                         foreach (var req in selectedRecipe.m_resources ?? Array.Empty<Piece.Requirement>())
                         {
