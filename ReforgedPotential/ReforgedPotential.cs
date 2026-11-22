@@ -50,9 +50,19 @@ namespace ReforgedPotential
         internal static ConfigEntry<int> Boss7MaxUpgradeLevel;
         internal static ConfigEntry<int> Boss8MaxUpgradeLevel;
 
+        internal static ConfigEntry<int> Boss1MaxUpgradeLevelForShields;
+        internal static ConfigEntry<int> Boss2MaxUpgradeLevelForShields;
+        internal static ConfigEntry<int> Boss3MaxUpgradeLevelForShields;
+        internal static ConfigEntry<int> Boss4MaxUpgradeLevelForShields;
+        internal static ConfigEntry<int> Boss5MaxUpgradeLevelForShields;
+        internal static ConfigEntry<int> Boss6MaxUpgradeLevelForShields;
+        internal static ConfigEntry<int> Boss7MaxUpgradeLevelForShields;
+        internal static ConfigEntry<int> Boss8MaxUpgradeLevelForShields;
+
         internal static ConfigEntry<bool> AllowExtraUpgradeLimitOnCurrentTier;
 
         internal static Dictionary<int, int> bossUpgradeValues;
+        internal static Dictionary<int, int> bossUpgradeValuesForShields;
 
         internal static Dictionary<int, string> bossNames = new Dictionary<int, string>()
         {
@@ -220,7 +230,7 @@ namespace ReforgedPotential
             };
         }
         private void LoadConfig()
-        {
+        {            
             Config.SaveOnConfigSet = true;
             EnableServerSync = Config.BindConfig("Server Only", "Enable Server Sync", true, "If true, config values are synchronized from server to clients.", synced: true);
             var isAdminOnly = EnableServerSync.Value;
@@ -294,34 +304,54 @@ namespace ReforgedPotential
             EnableLevelCap = Config.BindConfig("Upgrade Settings", "Enable Level Cap", false,
                 "If true, a level cap is enforced for all equipment upgrades (This takes precedence over boss upgrade limits)", isAdminOnly, 8);
             LevelCap = Config.BindConfig("Upgrade Settings", "Level Cap", 10,
-                "The maximum level that an equipment can be upgraded to if Enable Level Cap is set to true.", isAdminOnly, 8);
+                "The maximum level that an equipment can be upgraded to if Enable Level Cap is set to true.", isAdminOnly, 7);
             RequireFullUpgrade = Config.BindConfig("Upgrade Settings", "Require Full Upgrade", false,
                 "If true, the item must be fully upgraded before it can utilize the Forge of Potential.",
-                isAdminOnly, 7);
+                isAdminOnly, 6);
 
             #endregion
             //--------------
             #region Boss Progression
             EnableBossProgression = Config.BindConfig("Boss Progression", "Enable Boss Progression", true,
-                "If true, upgrades are limited by boss progression. Defeat bosses to unlock higher upgrade levels.", isAdminOnly, 10);
+                "If true, upgrades are limited by boss progression. Defeat bosses to unlock higher upgrade levels.", isAdminOnly, 20);
             BaseUpgradeLimit = Config.BindConfig("Boss Progression", "Base Upgrade Limit", 5,
-                "Base upgrade limit for all items before any additional calculations are made", isAdminOnly, 9);
+                "Base upgrade limit for all items before any additional calculations are made", isAdminOnly, 19);
             Boss1MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 1 Max Upgrade Level", 4,
-                "Additional max upgrade level unlocked for wooden tier after defeating Eikthyr.", isAdminOnly, 8);
+                "Additional max upgrade level unlocked for wooden tier after defeating Eikthyr.", isAdminOnly, 18);
             Boss2MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 2 Max Upgrade Level", 4,
-                "Additional max upgrade level unlocked for bronze tier and below after defeating Elder.", isAdminOnly, 8);
+                "Additional max upgrade level unlocked for bronze tier and below after defeating Elder.", isAdminOnly, 17);
             Boss3MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 3 Max Upgrade Level", 4,
-                "Additional max upgrade level unlocked for iron tier and below after defeating Bonemass.", isAdminOnly, 7);
+                "Additional max upgrade level unlocked for iron tier and below after defeating Bonemass.", isAdminOnly, 16);
             Boss4MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 4 Max Upgrade Level", 4,
-                "Additional max upgrade level unlocked for silver tier and below after defeating Moder.", isAdminOnly, 6);
+                "Additional max upgrade level unlocked for silver tier and below after defeating Moder.", isAdminOnly, 15);
             Boss5MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 5 Max Upgrade Level", 4,
-                "Additional max upgrade level unlocked for black metal tier and below after defeating Yagluth.", isAdminOnly, 5);
+                "Additional max upgrade level unlocked for black metal tier and below after defeating Yagluth.", isAdminOnly, 14);
             Boss6MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 6 Max Upgrade Level", 4,
-                "Additional max upgrade level unlocked for black marble tier and below after defeating Queen.", isAdminOnly, 4);
+                "Additional max upgrade level unlocked for black marble tier and below after defeating Queen.", isAdminOnly, 13);
             Boss7MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 7 Max Upgrade Level", 4,
-                "Additional max upgrade level unlocked for flametal tier and below after defeating Fader.", isAdminOnly, 3);
+                "Additional max upgrade level unlocked for flametal tier and below after defeating Fader.", isAdminOnly, 12);
             Boss8MaxUpgradeLevel = Config.BindConfig("Boss Progression", "Boss 8 Max Upgrade Level", 100,
-                "Additional max upgrade level unlocked for bloodgold tier and below after defeating Kall Fimbulbringer.", isAdminOnly, 2);
+                "Additional max upgrade level unlocked for bloodgold tier and below after defeating Kall Fimbulbringer.", isAdminOnly, 11);
+
+            Boss1MaxUpgradeLevelForShields = Config.BindConfig("Boss Progression", "Boss 1 Max Upgrade Level For Shields", 3,
+                "Additional max upgrade level unlocked for wooden tier shields after defeating Eikthyr.", isAdminOnly, 10);
+            Boss2MaxUpgradeLevelForShields = Config.BindConfig("Boss Progression", "Boss 2 Max Upgrade Level For Shields", 3,
+                "Additional max upgrade level unlocked for bronze tier and below shields after defeating Elder.", isAdminOnly, 9);
+            Boss3MaxUpgradeLevelForShields = Config.BindConfig("Boss Progression", "Boss 3 Max Upgrade Level For Shields", 3,
+                "Additional max upgrade level unlocked for iron tier and below shields after defeating Bonemass.", isAdminOnly, 8);
+            Boss4MaxUpgradeLevelForShields = Config.BindConfig("Boss Progression", "Boss 4 Max Upgrade Level For Shields", 3,
+                "Additional max upgrade level unlocked for silver tier and below shields after defeating Moder.", isAdminOnly, 7);
+            Boss5MaxUpgradeLevelForShields = Config.BindConfig("Boss Progression", "Boss 5 Max Upgrade Level For Shields", 3,
+                "Additional max upgrade level unlocked for black metal tier and below shields after defeating Yagluth.", isAdminOnly, 6);
+            Boss6MaxUpgradeLevelForShields = Config.BindConfig("Boss Progression", "Boss 6 Max Upgrade Level For Shields", 3,
+                "Additional max upgrade level unlocked for black marble tier and below shields after defeating Queen.", isAdminOnly, 5);
+            Boss7MaxUpgradeLevelForShields = Config.BindConfig("Boss Progression", "Boss 7 Max Upgrade Level For Shields", 3,
+                "Additional max upgrade level unlocked for flametal tier and below shields after defeating Fader.", isAdminOnly, 4);
+            Boss8MaxUpgradeLevelForShields = Config.BindConfig("Boss Progression", "Boss 8 Max Upgrade Level For Shields", 100,
+                "Additional max upgrade level unlocked for bloodgold tier and below shields after defeating Kall Fimbulbringer.", isAdminOnly, 3);
+
+
+
             bossUpgradeValues = new Dictionary<int, int>()
             {
                 { 0, 0 }, // No boss defeated
@@ -333,6 +363,19 @@ namespace ReforgedPotential
                 { 6, Boss6MaxUpgradeLevel.Value },
                 { 7, Boss7MaxUpgradeLevel.Value },
                 { 8, Boss8MaxUpgradeLevel.Value }
+            };
+
+            bossUpgradeValuesForShields = new Dictionary<int, int>()
+            {
+                { 0, 0 }, // No boss defeated
+                { 1, Boss1MaxUpgradeLevelForShields.Value },
+                { 2, Boss2MaxUpgradeLevelForShields.Value },
+                { 3, Boss3MaxUpgradeLevelForShields.Value },
+                { 4, Boss4MaxUpgradeLevelForShields.Value },
+                { 5, Boss5MaxUpgradeLevelForShields.Value },
+                { 6, Boss6MaxUpgradeLevelForShields.Value },
+                { 7, Boss7MaxUpgradeLevelForShields.Value },
+                { 8, Boss8MaxUpgradeLevelForShields.Value }
             };
             AllowExtraUpgradeLimitOnCurrentTier = Config.BindConfig("Boss Progression", "Allow Extra Upgrade Limit On Current Tier", true,
                 "If true, the current boss tier will allow for an extra upgrade limit on the current tier. (Ex. If you have defeated Eikthyr, you can upgrade Bronze tier items one level past the base limit)", isAdminOnly, 1);
@@ -455,6 +498,7 @@ namespace ReforgedPotential
                     bool hasNoCraftCost = player.NoCostCheat() || ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoCraftCost);
                     bool canAddCraftedItem = __instance.m_craftUpgradeItem != null || player.GetInventory().CanAddItem(__instance.m_craftRecipe.m_item.gameObject, 1);
                     var displayName = __instance.m_selectedRecipe.Recipe.m_item.name ?? "Unknown Item";
+                    var isShield = __instance.m_craftUpgradeItem.m_shared.m_itemType == ItemDrop.ItemData.ItemType.Shield;
                     if (!canAddCraftedItem)
                     {
                         return false;
@@ -572,7 +616,7 @@ namespace ReforgedPotential
                         {
                             var prefabName = __instance.m_selectedRecipe.Recipe.m_item.name;
                             var originalResource = originalRequirements.TryGetValue(prefabName, out var resource) ? resource : null;
-                            var totalIdolCost = UpgradeHelper.GetTotalIdolCosts(originalResource, originalQuality, RefundIdolsOnBreakStartingLevel.Value);
+                            var totalIdolCost = UpgradeHelper.GetTotalIdolCosts(originalResource, originalQuality, RefundIdolsOnBreakStartingLevel.Value, isShield);
                             foreach (var kvp in totalIdolCost)
                             {
                                 if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Total idol cost for {displayName} at quality {originalQuality}: {kvp.Key} = {kvp.Value}");
@@ -719,6 +763,7 @@ namespace ReforgedPotential
                     var selectedRecipePair = __instance.m_selectedRecipe;
                     var selectedRecipe = selectedRecipePair.Recipe;
                     var selectedItemData = selectedRecipePair.ItemData;
+                    var isShield = selectedItemData != null && selectedItemData.m_shared.m_itemType == ItemDrop.ItemData.ItemType.Shield;
 
                     if (selectedRecipe == null) return true;
 
@@ -759,7 +804,7 @@ namespace ReforgedPotential
                                 Jotunn.Logger.LogWarning($"Could not determine equipment tier for upgrader '{originalResource}'.");
                                 continue;
                             }
-                            int maxUpgradeLevel = UpgradeHelper.GetMaxUpgradeLevel(itemTier, highestBossTier);
+                            int maxUpgradeLevel = UpgradeHelper.GetMaxUpgradeLevel(itemTier, highestBossTier, isShield);
                             if (EnableLevelCap.Value)
                             {
                                 Jotunn.Logger.LogInfo($"Level cap is enabled, overriding max upgrade level for {selectedItemData.m_shared.m_name} to {LevelCap.Value}.");
@@ -822,6 +867,7 @@ namespace ReforgedPotential
                     var selectedRecipePair = __instance.m_selectedRecipe;
                     var selectedRecipe = selectedRecipePair.Recipe;
                     var selectedItemData = selectedRecipePair.ItemData;
+                    var isShield = selectedItemData != null && selectedItemData.m_shared.m_itemType == ItemDrop.ItemData.ItemType.Shield;
                     if (!originalRequirements.ContainsKey(selectedRecipe.m_item.name))
                     {
                         foreach (var req in selectedRecipe.m_resources ?? Array.Empty<Piece.Requirement>())
@@ -863,7 +909,7 @@ namespace ReforgedPotential
                                         continue;
                                     }
 
-                                    UpgradeHelper.GetEquivalentUpgradeValues(baseTier, qualityLevel, configuredMaxBoss, out equivTier, out candidateQuality);
+                                    UpgradeHelper.GetEquivalentUpgradeValues(baseTier, qualityLevel, configuredMaxBoss, isShield, out equivTier, out candidateQuality);
 
                                     currentEquivalentTier = equivTier;
 
@@ -886,14 +932,11 @@ namespace ReforgedPotential
 
                                         if (prefab != null && prefab.TryGetComponent(out itemDrop))
                                         {
-                                            if (EnableDebugLogging.Value)
-                                                Jotunn.Logger.LogInfo(
-                                                    $"{LogPrefix}Keeping original resource {itemDrop.name} and setting amount to {cost}.");
+                                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"{LogPrefix}Keeping original resource {itemDrop.name} and setting amount to {cost}.");
                                         }
                                         else
                                         {
-                                            Jotunn.Logger.LogError(
-                                                $"{LogPrefix}Could not find prefab for original resource '{resource}'.");
+                                            Jotunn.Logger.LogError($"{LogPrefix}Could not find prefab for original resource '{resource}'.");
                                         }
                                     }
                                     else

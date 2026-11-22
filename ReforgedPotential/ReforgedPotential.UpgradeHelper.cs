@@ -61,7 +61,7 @@ namespace ReforgedPotential
                 if (prefabName.Contains("Upgrader0")) return 0;
                 return -1; // unknown
             }
-            public static int GetMaxUpgradeLevel(int itemTier, int highestBossTier)
+            public static int GetMaxUpgradeLevel(int itemTier, int highestBossTier, bool isShield)
             {
                 int maxUpgrade = BaseUpgradeLimit.Value;
                 int firstRelevantBossTier = itemTier + 1;
@@ -70,10 +70,21 @@ namespace ReforgedPotential
                      bossTier <= highestBossTier;
                      bossTier++)
                 {
-                    if (bossUpgradeValues.TryGetValue(bossTier, out int upgradeAmount))
+                    if (isShield)
                     {
-                        maxUpgrade += upgradeAmount;
+                        if (bossUpgradeValuesForShields.TryGetValue(bossTier, out int shieldUpgradeAmount))
+                        {
+                            maxUpgrade += shieldUpgradeAmount;
+                        }
                     }
+                    else
+                    {
+                        if (bossUpgradeValues.TryGetValue(bossTier, out int upgradeAmount))
+                        {
+                            maxUpgrade += upgradeAmount;
+                        }
+                    }
+                    
                 }
 
                 // If the equipment tier matches the highest defeated boss tier, allow one additional upgrade for that tier
@@ -113,7 +124,7 @@ namespace ReforgedPotential
                 if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"No boss tier found that unlocks upgrades beyond currentUpgrade={currentUpgrade}. cumulativeUpgrade={cumulativeUpgrade}");
                 return -1;
             }
-            public static int GetEquivalentTier(int baseItemTier, int qualityLevel, int? highestBossTier = null)
+            public static int GetEquivalentTier(int baseItemTier, int qualityLevel, int? highestBossTier = null, bool isShield = false)
             {
                 // Use the supplied highest boss tier when provided.
                 // Otherwise use the highest configured boss tier.
@@ -130,7 +141,7 @@ namespace ReforgedPotential
 
                 // Determine how far this item is from the maximum quality
                 // available at its current equipment tier.
-                int currentMaxUpgrade = GetMaxUpgradeLevel(baseItemTier, maxBossTier);
+                int currentMaxUpgrade = GetMaxUpgradeLevel(baseItemTier, maxBossTier, isShield);
                 int distanceFromMax = currentMaxUpgrade - qualityLevel;
 
                 if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo(
@@ -145,7 +156,7 @@ namespace ReforgedPotential
                 for (int candidateTier = maxBossTier; candidateTier >= 0; candidateTier--)
                 {
                     int candidateMaxUpgrade =
-                        GetMaxUpgradeLevel(candidateTier, maxBossTier);
+                        GetMaxUpgradeLevel(candidateTier, maxBossTier, isShield);
 
                     int candidateQuality =
                         candidateMaxUpgrade - distanceFromMax;
@@ -173,7 +184,7 @@ namespace ReforgedPotential
                 return baseItemTier;
             }
 
-            public static Dictionary<string, int> GetTotalIdolCosts( string originalResource,int currentQuality,int startLevelToCalculateFrom)
+            public static Dictionary<string, int> GetTotalIdolCosts( string originalResource,int currentQuality,int startLevelToCalculateFrom, bool isShield)
             {
                 var idolCosts = new Dictionary<string, int>();
 
@@ -231,6 +242,7 @@ namespace ReforgedPotential
                         baseTier,
                         qualityLevel,
                         configuredMaxBoss,
+                        isShield,
                         out int idolTier,
                         out int candidateQuality);
 
@@ -265,7 +277,7 @@ namespace ReforgedPotential
                 return cost;
             }
 
-            public static void GetEquivalentUpgradeValues(int baseTier,int qualityLevel,int configuredMaxBoss, out int equivalentTier,out int candidateQuality)
+            public static void GetEquivalentUpgradeValues(int baseTier,int qualityLevel,int configuredMaxBoss, bool isShield, out int equivalentTier,out int candidateQuality)
             {
                 int candidateMax;
 
@@ -287,6 +299,8 @@ namespace ReforgedPotential
                 if (!EnableBossProgression.Value && EnableIdolProgression.Value)
                 {
                     int tierBlock = Math.Max(0, (qualityLevel - 1) / 4);
+                    if (isShield) 
+                        tierBlock = Math.Max(0, (qualityLevel - 1) / 3);
                     int desiredTier = baseTier + tierBlock;
                     int maxAvailableTier = bossUpgradeValues != null && bossUpgradeValues.Count > 0 ? bossUpgradeValues.Keys.Max() : 8;
 
@@ -303,15 +317,15 @@ namespace ReforgedPotential
                 if (EnableBossProgression.Value && !EnableIdolProgression.Value)
                 {
                     equivalentTier = baseTier;
-                    candidateMax = GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
+                    candidateMax = GetMaxUpgradeLevel(baseTier, configuredMaxBoss, isShield);
                     candidateQuality = Math.Max(1, Math.Min(candidateMax, qualityLevel));
                     return;
                 }
 
-                equivalentTier = GetEquivalentTier(baseTier, qualityLevel, configuredMaxBoss);
+                equivalentTier = GetEquivalentTier(baseTier, qualityLevel, configuredMaxBoss, isShield);
 
-                int baseMax = GetMaxUpgradeLevel(baseTier, configuredMaxBoss);
-                candidateMax = GetMaxUpgradeLevel(equivalentTier, configuredMaxBoss);
+                int baseMax = GetMaxUpgradeLevel(baseTier, configuredMaxBoss, isShield);
+                candidateMax = GetMaxUpgradeLevel(equivalentTier, configuredMaxBoss, isShield);
                 int distanceFromMax = baseMax - qualityLevel;
 
                 candidateQuality = candidateMax - distanceFromMax;
