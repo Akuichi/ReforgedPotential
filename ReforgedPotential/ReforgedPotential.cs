@@ -108,6 +108,7 @@ namespace ReforgedPotential
         internal static ConfigEntry<float> RefundIdolsPercentageOnBreak;
         internal static ConfigEntry<bool> EnableLevelCap;
         internal static ConfigEntry<int> LevelCap;
+        internal static ConfigEntry<bool> RequireFullUpgrade;
 
         internal static ConfigEntry<bool> EnableGlobalUpgradeNotifications;
         internal static ConfigEntry<string> SuccessMessage;
@@ -294,6 +295,9 @@ namespace ReforgedPotential
                 "If true, a level cap is enforced for all equipment upgrades (This takes precedence over boss upgrade limits)", isAdminOnly, 8);
             LevelCap = Config.BindConfig("Upgrade Settings", "Level Cap", 10,
                 "The maximum level that an equipment can be upgraded to if Enable Level Cap is set to true.", isAdminOnly, 8);
+            RequireFullUpgrade = Config.BindConfig("Upgrade Settings", "Require Full Upgrade", false,
+                "If true, the item must be fully upgraded before it can utilize the Forge of Potential.",
+                isAdminOnly, 7);
 
             #endregion
             //--------------
@@ -725,6 +729,13 @@ namespace ReforgedPotential
 
                     if (selectedItemData != null)
                     {
+                        // Check for innate upgrade limit
+                        if (RequireFullUpgrade.Value && selectedItemData.m_shared.m_maxQuality > 0 && selectedItemData.m_quality < selectedItemData.m_shared.m_maxQuality)
+                        {
+                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"Player attempted to upgrade {selectedItemData.m_shared.m_name} " + $"from quality {selectedItemData.m_quality} to {selectedItemData.m_quality + 1}. " + $"Max quality is {selectedItemData.m_shared.m_maxQuality}.");
+                            player?.Message(MessageHud.MessageType.Center, $"Upgrade this gear to level {selectedItemData.m_shared.m_maxQuality} to unlock its full potential.");
+                            return false;
+                        }
                         foreach (var req in selectedRecipe.m_resources ?? Array.Empty<Piece.Requirement>())
                         {
                             if (req == null || req.m_resItem == null) continue;
@@ -1228,6 +1239,34 @@ namespace ReforgedPotential
                                 {
                                     req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader2Weapon").GetComponent<ItemDrop>();
                                     if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_AxeIron");
+                                }
+                            }
+                        }
+
+                        // Cultivator
+                        if (recipe.name == "Recipe_Cultivator")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader1Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_Cultivator");
+                                }
+                            }
+                        }
+
+                        // Scyhe
+                        if (recipe.name == "Recipe_Scythe")
+                        {
+                            var resources = recipe.m_resources;
+                            foreach (var req in resources)
+                            {
+                                if (req.m_upgraderResource)
+                                {
+                                    req.m_resItem = PrefabManager.Instance.GetPrefab("Upgrader4Weapon").GetComponent<ItemDrop>();
+                                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo("Patched Recipe_Scythe");
                                 }
                             }
                         }
