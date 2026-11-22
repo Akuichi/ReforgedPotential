@@ -20,6 +20,7 @@ using static ClutterSystem;
 using static ItemDrop;
 using static Version;
 using Logger = Jotunn.Logger;
+
 namespace ReforgedPotential
 {
     [BepInPlugin(PluginGUID, PluginName, PluginVersion)]
@@ -93,6 +94,7 @@ namespace ReforgedPotential
         internal static ConfigEntry<float> UpgradeChance;
         internal static ConfigEntry<float> BreakChance;
         internal static ConfigEntry<bool> UseCustomChances;
+        internal static ConfigEntry<string> CustomChanceConfiguration;
         internal static ConfigEntry<bool> ConsumeIdolsOnlyOnFailure;
         internal static ConfigEntry<bool> RefundIdolsOnSuccess;
         internal static ConfigEntry<int> CostStart;
@@ -130,6 +132,7 @@ namespace ReforgedPotential
             {
                 LoadConfig();
                 SyncRecipes();
+
                 if (attr.InitialSynchronization)
                 {
                     Jotunn.Logger.LogMessage("Initial Config sync event received");
@@ -235,13 +238,20 @@ namespace ReforgedPotential
             #region Upgrade Settings
             AcceptableValueRange<float> floatRange = new AcceptableValueRange<float>(0, 1);
             UpgradeChance = Config.BindConfig("Upgrade Settings", "Upgrade Chance", 1f,
-                "Chance for an upgrade to succeed.", isAdminOnly, 22, floatRange);
+                "Chance for an upgrade to succeed.", isAdminOnly, 23, floatRange);
             BreakChance = Config.BindConfig("Upgrade Settings", "Break Chance", 0f,
                 "When an upgrade fails, this is the chance for it to break (Ex. 1 = Item will always break on upgrade failure, 0 = Item will just degrade 1 level on upgrade failure)",
-                isAdminOnly, 21, floatRange);
-            UseCustomChances = Config.BindConfig("Upgrade Settings", "Use Custom Chances from Json file", false,
-                "If true, you can map out custom values for upgrade/break chances per level. If false, the default upgrade chances will be used (See upgrade_chances.json)",
-                isAdminOnly, 20);
+                isAdminOnly, 22, floatRange);
+            UseCustomChances = Config.BindConfig("Upgrade Settings", "Use Custom Chances", false,
+                "If true, you can map out custom values for upgrade/break chances per level. If false, the default upgrade chances will be used.",
+                isAdminOnly, 21);
+            CustomChanceConfiguration = Config.BindConfig(
+                "Upgrade Settings",
+                "Custom Chance Configuration",
+                "lvl: 1,upgrade: 1,break: 0;lvl: 2,upgrade: 0.95,break: 0;lvl: 3,upgrade: 0.9,break: 0;lvl: 4,upgrade: 0.85,break: 0.9;lvl: 5,upgrade: 0.8,break: 0.8;lvl: 6,upgrade: 0.75,break: 0.6;lvl: 7,upgrade: 0.7,break: 0.6;lvl: 8,upgrade: 0.6,break: 0.5;lvl: 9,upgrade: 0.5,break: 0.5;lvl: 10,upgrade: 0.4,break: 0.5",
+                "Chance values used when Use Custom Chances is true, format: lvl: 1,upgrade: 1,break: 0;lvl: 2,upgrade: 0.9,break: 0.9 etc..",
+                isAdminOnly,
+                20);
             ConsumeIdolsOnlyOnFailure = Config.BindConfig("Upgrade Settings", "Consume Idols Only On Failure", false,
                 "If true, idols are just consumed and the item doesn't lose a level (Breaking still removes the item)", isAdminOnly, 19);
             RefundIdolsOnSuccess = Config.BindConfig("Upgrade Settings", "Refund Idols On Success", false,
@@ -408,7 +418,7 @@ namespace ReforgedPotential
             //--------------
             EnableDebugLogging = Config.BindConfig("Logging", "Enable Debug Logging", false,
                 "Show debug logging", false);
-            UpgradeHelper.LoadChanceConfiguration(Info.Location);
+            UpgradeHelper.LoadChanceConfiguration(CustomChanceConfiguration.Value);
             Config.Save();
         }
         #endregion
@@ -440,7 +450,7 @@ namespace ReforgedPotential
                     bool hasRequiredSingleIngredient = !__instance.m_craftRecipe.m_requireOnlyOneIngredient || singleIngredient != null;
                     bool hasNoCraftCost = player.NoCostCheat() || ZoneSystem.instance.GetGlobalKey(GlobalKeys.NoCraftCost);
                     bool canAddCraftedItem = __instance.m_craftUpgradeItem != null || player.GetInventory().CanAddItem(__instance.m_craftRecipe.m_item.gameObject, 1);
-                    var sharedName = __instance.m_craftUpgradeItem.m_shared.m_name ?? "Unknown Item";
+                    var displayName = __instance.m_selectedRecipe.Recipe.m_item.name ?? "Unknown Item";
                     if (!canAddCraftedItem)
                     {
                         return false;
@@ -521,9 +531,9 @@ namespace ReforgedPotential
                     // Break
                     else if (breakChance >= breakRandomRoll)
                     {
-                        ZLog.Log($"Upgrader <color=red>BROKE</color> " + $"{sharedName} level " + $"{craftQuality - 1} and was destroyed!");
+                        ZLog.Log($"Upgrader <color=red>BROKE</color> " + $"{displayName} level " + $"{craftQuality - 1} and was destroyed!");
 
-                        player.Message(MessageHud.MessageType.Center, Localization.instance.Localize("$msg_upgrader_broke", sharedName, (craftQuality - 1).ToString()), 0, null, log: true);
+                        player.Message(MessageHud.MessageType.Center, Localization.instance.Localize("$msg_upgrader_broke", __instance.m_craftUpgradeItem.m_shared.m_name, (craftQuality - 1).ToString()), 0, null, log: true);
 
                         outcome = UpgradeOutcome.Destroyed;
                         // Refund resources
@@ -561,7 +571,7 @@ namespace ReforgedPotential
                             var totalIdolCost = UpgradeHelper.GetTotalIdolCosts(originalResource, originalQuality, RefundIdolsOnBreakStartingLevel.Value);
                             foreach (var kvp in totalIdolCost)
                             {
-                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Total idol cost for {sharedName} at quality {originalQuality}: {kvp.Key} = {kvp.Value}");
+                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Total idol cost for {displayName} at quality {originalQuality}: {kvp.Key} = {kvp.Value}");
                                 if (kvp.Value > 0)
                                 {
                                     var itemPrefab = PrefabManager.Instance.GetPrefab(kvp.Key);
@@ -596,23 +606,23 @@ namespace ReforgedPotential
                     else
                     {
                         var failureCraftQuality = Mathf.Max(1, craftQuality - 2);
-                        ZLog.Log($"Upgrader <color=orange>FAILED</color> " + $"{__instance.m_craftUpgradeItem.m_shared.m_name} level " + $"{craftQuality - 1}, level was reduced!");
+                        ZLog.Log($"Upgrader <color=orange>FAILED</color> " + $"{displayName} level " + $"{craftQuality - 1}, level was reduced!");
                         var failureMessage = "Upgrade failed!";
                         if (ConsumeIdolsOnlyOnFailure.Value)
                         {
                             failureCraftQuality = __instance.m_craftUpgradeItem.m_quality;
-                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {sharedName}, level was not reduced due to 'Consume Idols Only On Failure' = True");
+                            if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {displayName}, level was not reduced due to 'Consume Idols Only On Failure' = True");
                         }
                         else
                         {
                             if (originalQuality == 1)
                             {
-                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {sharedName}, cannot change below level 1.");
+                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {displayName}, cannot change below level 1.");
                             }
                             else
                             {
-                                failureMessage = $"Upgrade failed, {sharedName}'s level was reduced!";
-                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {sharedName}, item level was reduced.");
+                                failureMessage = $"Upgrade failed, {Localization.instance.Localize(__instance.m_craftUpgradeItem.m_shared.m_name)}'s level was reduced!";
+                                if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"DoCraftingPostfix: Upgrade failed for {displayName}, item level was reduced.");
                             }
                         }
                         craftedItem = player.GetInventory().AddItem(

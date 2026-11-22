@@ -2,11 +2,9 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.IO;
 using System.Linq;
 using UnityEngine;
 using System.Globalization;
-using System.Text.RegularExpressions;
 namespace ReforgedPotential
 {
     public partial class ReforgedPotential
@@ -22,14 +20,7 @@ namespace ReforgedPotential
                 public float BreakChance;
             }
 
-            [Serializable]
-            public sealed class ChanceConfiguration
-            {
-                public ChanceEntry[] Entries;
-            }
-
             private static readonly List<ChanceEntry> ChanceEntries = new List<ChanceEntry>();
-            private const string ChanceFileName = "upgrade_chances.json";
 
             private static readonly (string EnemyId, int Tier, string Name)[] BossTiers =
             {
@@ -325,72 +316,139 @@ namespace ReforgedPotential
 
                 candidateQuality = candidateMax - distanceFromMax;
                 candidateQuality = Math.Max(1, Math.Min(candidateMax, candidateQuality));
-            }                        
+            }
 
-            public static void LoadChanceConfiguration(string pluginLocation)
+            public static void LoadChanceConfiguration(string configuration)
             {
                 ChanceEntries.Clear();
 
-                string pluginDirectory = Path.GetDirectoryName(pluginLocation);
-                string chanceFilePath = Path.Combine(pluginDirectory, ChanceFileName);
-
                 try
                 {
-                    if (!File.Exists(chanceFilePath))
+                    if (!string.IsNullOrWhiteSpace(configuration))
                     {
-                        ChanceConfiguration defaultConfiguration = new ChanceConfiguration
+                        string[] serializedEntries = configuration.Split(new[] { ';' }, StringSplitOptions.RemoveEmptyEntries);
+
+                        foreach (string serializedEntry in serializedEntries)
                         {
-                            Entries = Enumerable.Range(1, 10).Select(level => new ChanceEntry
+                            string[] fields = serializedEntry.Split(new[] { ',' }, StringSplitOptions.RemoveEmptyEntries);
+
+                            int level = 0;
+                            float upgradeChance = 0f;
+                            float breakChance = 0f;
+                            bool hasLevel = false;
+                            bool hasUpgradeChance = false;
+                            bool hasBreakChance = false;
+                            bool isValid = true;
+
+                            foreach (string rawField in fields)
+                            {
+                                string field = rawField.Trim();
+                                int separatorIndex = field.IndexOf(':');
+
+                                if (separatorIndex <= 0 || separatorIndex >= field.Length - 1)
                                 {
-                                    Level = level,
-                                    UpgradeChance = UpgradeChance.Value,
-                                    BreakChance = BreakChance.Value
-                                }).ToArray()
-                        };
+                                    isValid = false;
+                                    break;
+                                }
+
+                                string key = field.Substring(0, separatorIndex).Trim().ToLowerInvariant();
+                                string value = field.Substring(separatorIndex + 1).Trim();
+
+                                switch (key)
+                                {
+                                    case "lvl":
+                                    case "level":
+                                        if (!int.TryParse(
+                                                value,
+                                                NumberStyles.Integer,
+                                                CultureInfo.InvariantCulture,
+                                                out level))
+                                        {
+                                            isValid = false;
+                                        }
+                                        else
+                                        {
+                                            hasLevel = true;
+                                        }
+
+                                        break;
+
+                                    case "upgrade":
+                                    case "upgradechance":
+                                        if (!float.TryParse(value,NumberStyles.Float, CultureInfo.InvariantCulture, out upgradeChance))
+                                        {
+                                            isValid = false;
+                                        }
+                                        else
+                                        {
+                                            hasUpgradeChance = true;
+                                        }
+
+                                        break;
+
+                                    case "break":
+                                    case "breakchance":
+                                        if (!float.TryParse(value, NumberStyles.Float, CultureInfo.InvariantCulture, out breakChance))
+                                        {
+                                            isValid = false;
+                                        }
+                                        else
+                                        {
+                                            hasBreakChance = true;
+                                        }
+
+                                        break;
+
+                                    default:
+                                        isValid = false;
+                                        break;
+                                }
+
+                                if (!isValid)
+                                {
+                                    break;
+                                }
+                            }
+
+                            if (!isValid ||
+                                !hasLevel ||
+                                !hasUpgradeChance ||
+                                !hasBreakChance ||
+                                level <= 0 ||
+                                float.IsNaN(upgradeChance) ||
+                                float.IsInfinity(upgradeChance) ||
+                                float.IsNaN(breakChance) ||
+                                float.IsInfinity(breakChance) ||
+                                upgradeChance < 0f ||
+                                upgradeChance > 1f ||
+                                breakChance < 0f ||
+                                breakChance > 1f)
+                            {
+                                if (EnableDebugLogging.Value) Jotunn.Logger.LogWarning($"Ignoring invalid chance configuration entry: '{serializedEntry}'.");
+
+                                continue;
+                            }
+
+                            if (ChanceEntries.Any(entry => entry.Level == level))
+                            {
+                                if (EnableDebugLogging.Value) Jotunn.Logger.LogWarning($"Ignoring duplicate chance configuration level {level}.");
+                                continue;
+                            }
+
+                            ChanceEntries.Add(new ChanceEntry
+                            {
+                                Level = level,
+                                UpgradeChance = upgradeChance,
+                                BreakChance = breakChance
+                            });
+                        }
+
+                        ChanceEntries.Sort((left, right) => left.Level.CompareTo(right.Level));
                     }
-
-                    string json = File.ReadAllText(chanceFilePath);
-
-                    MatchCollection entryMatches = Regex.Matches(
-                        json,
-                        @"\{[^{}]*""Level""\s*:\s*(?<level>-?\d+)[^{}]*""UpgradeChance""\s*:\s*(?<upgradeChance>-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)[^{}]*""BreakChance""\s*:\s*(?<breakChance>-?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)\s*\}",
-                        RegexOptions.IgnoreCase);
-
-                    foreach (Match match in entryMatches)
-                    {
-                        if (!int.TryParse(match.Groups["level"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int level))
-                        {
-                            continue;
-                        }
-
-                        if (!float.TryParse(match.Groups["upgradeChance"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float upgradeChance))
-                        {
-                            continue;
-                        }
-
-                        if (!float.TryParse( match.Groups["breakChance"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out float breakChance))
-                        {
-                            continue;
-                        }
-
-                        if (level <= 0)
-                        {
-                            continue;
-                        }
-
-                        ChanceEntries.Add(new ChanceEntry
-                        {
-                            Level = level,
-                            UpgradeChance = upgradeChance,
-                            BreakChance = breakChance
-                        });
-                    }
-
-                    ChanceEntries.Sort((left, right) => left.Level.CompareTo(right.Level));
                 }
                 catch (Exception exception)
                 {
-                    Jotunn.Logger.LogError( $"Failed to load {ChanceFileName}: {exception}");
+                    Jotunn.Logger.LogError($"Failed to parse chance configuration string: {exception}");
                 }
 
                 if (ChanceEntries.Count == 0)
@@ -402,12 +460,15 @@ namespace ReforgedPotential
                         BreakChance = BreakChance.Value
                     });
 
-                    if (EnableDebugLogging.Value) Jotunn.Logger.LogWarning($"{ChanceFileName} did not contain any valid entries. " + "Using the configured global chances.");
+                    if (EnableDebugLogging.Value)
+                    {
+                        Jotunn.Logger.LogWarning("Chance configuration contained no valid entries.");
+                    }
                 }
 
                 if (EnableDebugLogging.Value)
                 {
-                    if (EnableDebugLogging.Value) Jotunn.Logger.LogInfo($"Loaded {ChanceEntries.Count} chance entries from {chanceFilePath}.");
+                    Jotunn.Logger.LogInfo($"Loaded {ChanceEntries.Count} chance configuration entries.");
                 }
             }
 
